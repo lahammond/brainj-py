@@ -1,0 +1,11 @@
+**BrainJ Single Brain Processing**
+
+- Currently expects registered sections from BrainJ ImageJ pipeline
+- Channels are enhanced using CARE networks trained on 1.6µm data and segmented using U-Nets and StarDist.
+- csv files of raw, transformed and mapped cells are generated in addition to optional intermediate images for data checking
+
+__author__    = 'Luke Hammond <lh2881@columbia.edu>'
+__license__   = 'MIT License (see LICENSE)'
+__copyright__ = 'Copyright © 2022 by Luke Hammond'
+__webpage__   = 'http://cellularimaging.org'
+__download__  = 'http://www.github.com/lahmmond/BrainJ-Python'
