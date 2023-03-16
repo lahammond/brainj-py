@@ -297,6 +297,8 @@ def restore_and_segment(channel, section, rest_model_path, rest_type, seg_model,
     #nms_threshold = float(settings['stard_nms_thresh'])
     nms_threshold = settings.stard_nms_thresh    
     #saveval = int(saveval)
+    if saveval == True:
+        print("Validation images will be saved.")
 
     #load restoration model
     print("Restoration model = ", rest_model_path)
@@ -308,7 +310,7 @@ def restore_and_segment(channel, section, rest_model_path, rest_type, seg_model,
             shape1 = image.shape[1]
             print("Scale used: ", scale)
             #apply restoration model to channel
-            print("Restoring image...")
+            print("Restoring image for channel ", channel)
 
             with main.HiddenPrints():
                 
@@ -382,9 +384,10 @@ def restore_and_segment(channel, section, rest_model_path, rest_type, seg_model,
         #preprocess if necessary
 
     if preprocess[0] > 0:
-        filterSize =disk(preprocess[0])
+        print("Using tophat filter: ", preprocess[0])
+        filterSize =morphology.disk(preprocess[0])
         # Applying the Top-Hat operation
-        restored = white_tophat(image, filterSize)
+        restored = morphology.white_tophat(restored, filterSize)
         
     #remove  background
     if preprocess[2] > 0:
@@ -397,15 +400,15 @@ def restore_and_segment(channel, section, rest_model_path, rest_type, seg_model,
  
 
     #label on restored image
-    print("Detecting cells...")
+    print("Detecting cells for channel ", channel)
         
-
     if scale > 1:
         restored = rescale(restored, scale, anti_aliasing=False)
         tiles_for_prediction = tuple(x * trunc(scale) for x in tiles_for_prediction)
     
     if seg_model[0] == 'StarDist2D':
         model = StarDist2D.from_pretrained(seg_model[1])
+        restored = restored.astype(np.uint16)
 
         with main.HiddenPrints():
         
@@ -423,7 +426,7 @@ def restore_and_segment(channel, section, rest_model_path, rest_type, seg_model,
 
         labels = cv2.resize(labels, (shape1,shape0), interpolation=cv2.INTER_NEAREST)
         #labels = rescale(labels, 1/scale, anti_aliasing=True)
-        print(restored.shape, labels.shape)
+        print("restored shape is now: ", restored.shape, " Label shape is now: ", labels.shape)
     
     
     masks = labels>1
@@ -434,30 +437,30 @@ def restore_and_segment(channel, section, rest_model_path, rest_type, seg_model,
     
     
     #save validation data:
-    if saveval == 1:
+    if saveval == True:
+        print("restored type is" + str(restored.dtype))
+        print("labels type is" + str(labels.dtype))
     
         if settings.validation_format == "tif":
             #imwrite(restore_val_dir+str(channel)+"/"+str(section)+".tif", restored.astype('uint16'), imagej=True)
             #imwrite(restore_val_dir+str(channel)+"/"+str(section)+".tif", labels.astype('uint16'), imagej=True)
-            
-            skimage.io.imsave(locations.restore_val_dir+str(channel)+"/"+str(section)+".tif", restored, plugin='tifffile')
-            skimage.io.imsave(locations.cell_val_dir+str(channel)+"/"+str(section)+".tif", labels, plugin='tifffile')
+
+            skimage.io.imsave(locations.restore_val_dir+str(channel)+"/"+str(section)+".tif", restored.astype(np.uint16), plugin='tifffile', photometric='minisblack')
+            skimage.io.imsave(locations.cell_val_dir+str(channel)+"/"+str(section)+".tif", labels.astype(np.uint16), plugin='tifffile', photometric='minisblack')
         #if validation_format == "tif" and scale > 1:
             #imwrite(restore_val_dir+str(channel)+"/"+str(section)+".tif", rescale(restored, 1/scale, anti_aliasing=False).astype('uint16'), imagej=True)
             #imwrite(cell_val_dir+str(channel)+"/"+str(section)+".tif", rescale(labels, 1/scale, anti_aliasing=False).astype('uint16'), imagej=True)
             
         if settings.validation_format != "tif":
-            #scale down 2x2 then save as jpeg
-            #save restored image
             
-            #rescale further if scaled up
+            #scale down by validation scale and save as jpeg
             #validation_scale = tuple(x * scale for x in validation_scale)
             
             #might not work - with larger files - may need to use skimage.io as above
             cv2.imwrite(locations.restore_val_dir+str(channel)+"/"+str(section)+".jpg", rescale(restored, 1/(validation_scale[0]), anti_aliasing=False).astype('uint16'), [cv2.IMWRITE_JPEG_QUALITY, settings.validation_jpeg_comp]) 
             #save filtered labels colored by area
             cv2.imwrite(locations.cell_val_dir+str(channel)+"/"+str(section)+".jpg", rescale(labels, 1/(validation_scale[0]), anti_aliasing=False).astype('uint16'), [cv2.IMWRITE_JPEG_QUALITY, settings.validation_jpeg_comp]) 
-        
+    print("")    
     return restored, labels, masks
 
 
