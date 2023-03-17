@@ -408,7 +408,7 @@ def restore_and_segment(channel, section, rest_model_path, rest_type, seg_model,
     
     if seg_model[0] == 'StarDist2D':
         model = StarDist2D.from_pretrained(seg_model[1])
-        restored = restored.astype(np.uint16)
+        #restored = restored.astype(np.uint16)
 
         with main.HiddenPrints():
         
