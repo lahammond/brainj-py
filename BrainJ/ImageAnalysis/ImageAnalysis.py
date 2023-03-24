@@ -37,7 +37,7 @@ from math import trunc
 
 import skimage.io
 from skimage.transform import rescale, downscale_local_mean
-from skimage import color, data, filters, measure, morphology, segmentation, util
+from skimage import color, data, filters, measure, morphology, segmentation, util, exposure
 
 
     
@@ -445,9 +445,8 @@ def restore_and_segment(channel, section, rest_model_path, rest_type, seg_model,
     if saveval == True:
         print("restored type is" + str(restored.dtype))
         if restored.dtype != "uint16":
-            restored = restored - restored.min()
-            restored = restored / restored.max()
-            restored =  restored * 65535
+            restored = exposure.rescale_intensity(restored, in_range=(np.min(restored), np.max(restored)), out_range='uint16')
+
             restored.astype(np.uint16)
 
         
