@@ -40,32 +40,22 @@ brain_dirs = ["D:/BrainJ Datasets/B4 Fast Test 1/"]#,
 for brain_dir in brain_dirs:
     print("Processing brain: "+brain_dir)
 
+    #Load in experiment parameters and analysis settings   
+    settings, locations = main.initialize_brainJ(brain_dir)
 
-#%%
-#Load in experiment parameters and analysis settings
-
-settings, locations = main.initialize_brainJ(brain_dir)
-
-#imgan.import_settings_and_locations(Settings, Locations)
-
-#%%
-#Modify specific parameters and settings:
-
-settings.save_intermediate_data = True
-locations.annotations_table = "C:/Users/Luke_H/Desktop/BrainJ Atlas/ABA_CCF_25_2017/Atlas_Regions.csv"
-settings.tiles_for_prediction = (1,1)
-
-#%%
-#restore and detect cells
-rawcells1, rawcells2, rawcells3, rawcells4 = imgan.cell_detection(settings, locations)
+    #Modify specific parameters and settings:    
+    settings.save_intermediate_data = True
+    locations.annotations_table = "C:/Users/Luke_H/Desktop/BrainJ Atlas/ABA_CCF_25_2017/Atlas_Regions.csv"
+    settings.tiles_for_prediction = (2,2)
+    settings.c1_cell_analysis = True
 
 
-#%%
-#transform cells
-transformedcells1, transformedcells2, transformedcells3, transformedcells4 = imgan.transform_cells(rawcells1, rawcells2, rawcells3, rawcells4, settings, locations)
-                
-#%%
-#Annotate cells and create tables
+    #restore and detect cells
+    rawcells1, rawcells2, rawcells3, rawcells4 = imgan.cell_detection(settings, locations)
 
-imgan.annotate_all_cells(transformedcells1, transformedcells2, transformedcells3, transformedcells4, settings, locations)
+    #transform cells
+    transformedcells1, transformedcells2, transformedcells3, transformedcells4 = imgan.transform_cells(rawcells1, rawcells2, rawcells3, rawcells4, settings, locations)
+    
+    #Annotate cells and create tables
+    imgan.annotate_all_cells(transformedcells1, transformedcells2, transformedcells3, transformedcells4, settings, locations)
 

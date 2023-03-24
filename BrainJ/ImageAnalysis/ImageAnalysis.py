@@ -323,6 +323,10 @@ def restore_and_segment(channel, section, rest_model_path, rest_type, seg_model,
                 #rescale to 16bit
                 #restored = restored * 65535
                 restored = restored.astype(np.uint16)
+                #remove low intensities that are artifacts
+                cutoff = rest_type[1]
+                restored[restored < cutoff] = 0
+                
         if rest_type[0] == 'tf':
             print("Section image shape: ", image.shape)
             shape0 = image.shape[0]
@@ -375,6 +379,7 @@ def restore_and_segment(channel, section, rest_model_path, rest_type, seg_model,
             predicted_patches_reshaped = np.reshape(patched_prediction, (patches.shape[0], patches.shape[1], 256,256) )
             reconstructed_image = unpatchify(predicted_patches_reshaped, padded_image.shape)
             restored = reconstructed_image[0:dim_y, 0:dim_x]  
+            
     else:
         print("No restoration selected. Using raw data for detection.")
         restored = image
@@ -439,6 +444,13 @@ def restore_and_segment(channel, section, rest_model_path, rest_type, seg_model,
     #save validation data:
     if saveval == True:
         print("restored type is" + str(restored.dtype))
+        if restored.dtype != "uint16":
+            restored = restored - restored.min()
+            restored = restored / restored.max()
+            restored =  restored * 65535
+            restored.astype(np.uint16)
+
+        
         print("labels type is" + str(labels.dtype))
     
         if settings.validation_format == "tif":
