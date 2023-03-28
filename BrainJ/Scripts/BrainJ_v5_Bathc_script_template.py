@@ -33,7 +33,7 @@ main.check_gpu()
 #%% Provide Brain dir or dirs: - convert to loop
 
 
-brain_dirs = ["D:/BrainJ Datasets/B4 Fast Test 1/"]#,
+brain_dirs = ["D:/BrainJ Datasets/Test Run A31/"]#,
               #"D:/BrainJ Datasets/B4 Fast Test2/",
               #"D:/BrainJ Datasets/B4 Fast Test2/"]
 

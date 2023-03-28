@@ -37,7 +37,7 @@ from math import trunc
 
 import skimage.io
 from skimage.transform import rescale, downscale_local_mean
-from skimage import color, data, filters, measure, morphology, segmentation, util, exposure
+from skimage import color, data, filters, measure, morphology, segmentation, util, exposure, restoration
 
 
     
@@ -162,7 +162,8 @@ def analyze_section(section, section_count, settings, locations, rawcells1, rawc
         c1_restore, c1_labels, c1_mask = restore_and_segment(1, section, settings.c1_rest_model_path, settings.c1_rest_type, 
                                                              settings.c1_seg_model,
                                                              c1_raw, settings.c1_scale, settings.c1_preprocess, 
-                                                             settings.c1_prob_thresh, settings.c1_save_val_data,
+                                                             settings.c1_prob_thresh, settings.c1_normalize,
+                                                             settings.c1_save_val_data,
                                                              settings, locations)
     if settings.c2_cell_analysis == True:
         print("Restoring and segmenting channel 2...")
@@ -172,7 +173,7 @@ def analyze_section(section, section_count, settings, locations, rawcells1, rawc
         c2_restore, c2_labels, c2_mask = restore_and_segment(2, section, settings.c2_rest_model_path, settings.c2_rest_type, 
                                                              settings.c2_seg_model,
                                                              c2_raw, settings.c2_scale, settings.c2_preprocess, 
-                                                             settings.c2_prob_thresh, 
+                                                             settings.c2_prob_thresh, settings.c2_normalize,
                                                              settings.c2_save_val_data,
                                                              settings, locations)
     if settings.c3_cell_analysis == True:
@@ -183,7 +184,7 @@ def analyze_section(section, section_count, settings, locations, rawcells1, rawc
         c3_restore, c3_labels, c3_mask = restore_and_segment(3, section, settings.c3_rest_model_path, settings.c3_rest_type, 
                                                              settings.c3_seg_model,
                                                              c3_raw, settings.c3_scale, settings.c3_preprocess, 
-                                                             settings.c3_prob_thresh, 
+                                                             settings.c3_prob_thresh, settings.c3_normalize,
                                                              settings.c3_save_val_data,
                                                              settings, locations)
     if settings.c4_cell_analysis == True:
@@ -194,7 +195,7 @@ def analyze_section(section, section_count, settings, locations, rawcells1, rawc
         c4_restore, c4_labels, c4_mask = restore_and_segment(4, section, settings.c4_rest_model_path, settings.c4_rest_type, 
                                                              settings.c4_seg_model,
                                                              c4_raw, settings.c4_scale, settings.c4_preprocess, 
-                                                             settings.c4_prob_thresh, 
+                                                             settings.c4_prob_thresh, settings.c4_normalize,
                                                              settings.c4_save_val_data,
                                                              settings, locations)
 
@@ -284,7 +285,7 @@ def analyze_section(section, section_count, settings, locations, rawcells1, rawc
         
     return rawcells1, rawcells2, rawcells3, rawcells4
    
-def restore_and_segment(channel, section, rest_model_path, rest_type, seg_model, image, scale, preprocess, prob_thresh, saveval, settings, locations):
+def restore_and_segment(channel, section, rest_model_path, rest_type, seg_model, image, scale, preprocess, prob_thresh, normalize_range, saveval, settings, locations):
     #preprocess = list(map(int, (ast.literal_eval(preprocess))))
     #tiles_for_prediction = list(map(int, (ast.literal_eval(settings['tiles_for_prediction']))))
     tiles_for_prediction = settings.tiles_for_prediction
@@ -320,12 +321,15 @@ def restore_and_segment(channel, section, rest_model_path, rest_type, seg_model,
                 #restore image
                 restored = rest_model.predict(image, axes='YX', n_tiles=tiles_for_prediction)
 
-                #rescale to 16bit
-                #restored = restored * 65535
+                #convert to 16bit
+               
                 restored = restored.astype(np.uint16)
-                #remove low intensities that are artifacts
-                cutoff = rest_type[1]
-                restored[restored < cutoff] = 0
+                #remove low intensities that are artifacts 
+                #as restored images have varying backgrounds due to high variability in samples. Detect background with median, then add the cutoff
+                #cutoff = np.median(restored) + rest_type[1]
+                #restored[restored < cutoff] = 0
+                background = restoration.rolling_ball(restored, radius=5)
+                restored = restored - background
                 
         if rest_type[0] == 'tf':
             print("Section image shape: ", image.shape)
@@ -378,7 +382,11 @@ def restore_and_segment(channel, section, rest_model_path, rest_type, seg_model,
             patched_prediction = np.array(patched_prediction)
             predicted_patches_reshaped = np.reshape(patched_prediction, (patches.shape[0], patches.shape[1], 256,256) )
             reconstructed_image = unpatchify(predicted_patches_reshaped, padded_image.shape)
-            restored = reconstructed_image[0:dim_y, 0:dim_x]  
+            restored = reconstructed_image[0:dim_y, 0:dim_x]
+            #print(restored.dtype)
+            #restored = exposure.rescale_intensity(restored, in_range=(np.min(restored), np.max(restored)), out_range='float32')
+            #restored = exposure.rescale_intensity(restored, in_range=(np.min(restored), np.max(restored*2)), out_range='uint16')
+            #restored = restored.astype(np.uint16)
             
     else:
         print("No restoration selected. Using raw data for detection.")
@@ -413,11 +421,11 @@ def restore_and_segment(channel, section, rest_model_path, rest_type, seg_model,
     
     if seg_model[0] == 'StarDist2D':
         model = StarDist2D.from_pretrained(seg_model[1])
-        #restored = restored.astype(np.uint16)
+
 
         with main.HiddenPrints():
         
-            labels, _ = model.predict_instances(normalize(restored, 1,99.8),
+            labels, _ = model.predict_instances(normalize(restored, normalize_range[0],normalize_range[1]),
                                           axes='YX', 
                                           prob_thresh=prob_thresh, #default 0.5 #for dapi 0.05
                                           nms_thresh=nms_threshold,   #default 0.4 #for dapi 0.3

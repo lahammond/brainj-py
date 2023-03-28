@@ -214,6 +214,7 @@ class Create_Settings():
             self.c1_rest_model_path = setting["Channel_1"]["rest_model_path"]
             self.c1_rest_type = ast.literal_eval(setting["Channel_1"]["rest_type"])
             self.c1_seg_model = ast.literal_eval(setting["Channel_1"]["seg_model"])
+            self.c1_normalize = list(map(int, (ast.literal_eval(setting["Channel_1"]["normalize"]))))
             self.c1_scale = setting["Channel_1"]["scale"]
             self.c1_preprocess = list(map(int, (ast.literal_eval(setting["Channel_1"]["preprocess"]))))
             self.c1_prob_thresh = setting["Channel_1"]["prob_thresh"]
@@ -226,6 +227,7 @@ class Create_Settings():
             self.c2_rest_model_path = setting["Channel_2"]["rest_model_path"]
             self.c2_rest_type = ast.literal_eval(setting["Channel_2"]["rest_type"])
             self.c2_seg_model = ast.literal_eval(setting["Channel_2"]["seg_model"])
+            self.c2_normalize = list(map(int, (ast.literal_eval(setting["Channel_2"]["normalize"]))))
             self.c2_scale = setting["Channel_2"]["scale"]
             self.c2_preprocess = list(map(int, (ast.literal_eval(setting["Channel_2"]["preprocess"]))))
             self.c2_prob_thresh = setting["Channel_2"]["prob_thresh"]
@@ -238,6 +240,7 @@ class Create_Settings():
             self.c3_rest_model_path = setting["Channel_3"]["rest_model_path"]
             self.c3_rest_type = ast.literal_eval(setting["Channel_3"]["rest_type"])
             self.c3_seg_model = ast.literal_eval(setting["Channel_3"]["seg_model"])
+            self.c3_normalize = list(map(int, (ast.literal_eval(setting["Channel_3"]["normalize"]))))
             self.c3_scale = setting["Channel_3"]["scale"]
             self.c3_preprocess = list(map(int, (ast.literal_eval(setting["Channel_3"]["preprocess"]))))
             self.c3_prob_thresh = setting["Channel_3"]["prob_thresh"]
@@ -250,6 +253,7 @@ class Create_Settings():
             self.c4_rest_model_path = setting["Channel_4"]["rest_model_path"]
             self.c4_rest_type = ast.literal_eval(setting["Channel_4"]["rest_type"])
             self.c4_seg_model = ast.literal_eval(setting["Channel_4"]["seg_model"])
+            self.c4_normalize = list(map(int, (ast.literal_eval(setting["Channel_4"]["normalize"]))))
             self.c4_scale = setting["Channel_4"]["scale"]
             self.c4_preprocess = list(map(int, (ast.literal_eval(setting["Channel_4"]["preprocess"]))))
             self.c4_prob_thresh = setting["Channel_4"]["prob_thresh"]
