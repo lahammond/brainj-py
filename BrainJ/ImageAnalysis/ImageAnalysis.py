@@ -40,7 +40,7 @@ from skimage.transform import rescale, downscale_local_mean
 from skimage import color, data, filters, measure, morphology, segmentation, util, exposure, restoration
 
 
-    
+import cupy as cp
 
 import matplotlib.pyplot as plt
 
@@ -69,7 +69,7 @@ def cell_detection(settings, locations):
       
     section_count = check_registered_sections(locations.registered_dir)
 
-    rawcells1, rawcells2, rawcells3, rawcells4 = process_sections(section_count, settings, locations)
+    rawcells = process_sections(section_count, settings, locations)
     #rawcells1, rawcells2, rawcells3, rawcells4 = process_sections(section_count, settings, locations)
     
     if settings.save_intermediate_data == True:
@@ -103,10 +103,7 @@ def check_registered_sections(registered_dir):
 def process_sections(section_count, settings, locations):
     #find a way to make these as needed elegantly
     #currently need all dataframes but should only require dfs being used
-    rawcells1 = pd.DataFrame()
-    rawcells2 = pd.DataFrame()
-    rawcells3 = pd.DataFrame()
-    rawcells4 = pd.DataFrame()
+    rawcells = pd.DataFrame()
 
     for section in range(len(section_count)):
     #for section in range(1):
@@ -478,7 +475,7 @@ def restore_and_segment(channel, section, rest_model_path, rest_type, seg_model,
             #might not work - with larger files - may need to use skimage.io as above
             cv2.imwrite(locations.restore_val_dir+str(channel)+"/"+str(section)+".jpg", rescale(restored, 1/(validation_scale[0]), anti_aliasing=False).astype('uint16'), [cv2.IMWRITE_JPEG_QUALITY, settings.validation_jpeg_comp]) 
             #save filtered labels colored by area
-            cv2.imwrite(locations.cell_val_dir+str(channel)+"/"+str(section)+".jpg", rescale(labels, 1/(validation_scale[0]), anti_aliasing=False).astype('uint16'), [cv2.IMWRITE_JPEG_QUALITY, settings.validation_jpeg_comp]) 
+            cv2.imwrite(locations.cell_val_dir+str(channel)+"/"+str(section)+".jpg", rescale(labels, 1/(validation_scale[0]), anti_aliasing=False).astype('uint32'), [cv2.IMWRITE_JPEG_QUALITY, settings.validation_jpeg_comp]) 
     print("")    
     return restored, labels, masks
 
@@ -583,12 +580,12 @@ def measure_and_create_validation_image(channel, section, raw_image, restored_im
     print("After filtering", len(filtered_table), "objects remain from total of", len(main_table))
     
     #create colored by area image - don't need to color by area
-    colored_by_area = util.map_array(
-        labels,
-        np.asarray(filtered_table['label']),
-        np.asarray(filtered_table['area']).astype(float),
-        #np.asarray(filtered_table['label']).astype(float),
-        )
+    #colored_by_area = util.map_array(
+    #    labels,
+    #    np.asarray(filtered_table['label']),
+    #    np.asarray(filtered_table['area']).astype(float),
+    #    #np.asarray(filtered_table['label']).astype(float),
+    #    )
     
     #create validation images
     if saveval == True:
@@ -598,11 +595,14 @@ def measure_and_create_validation_image(channel, section, raw_image, restored_im
         #cells as different intensities, but all around same value - rather than thousands of values, potentially requiring 32bit.
         
         if settings.validation_format == "tif":
-            imwrite(locations.cell_val_dir+str(channel)+"/"+str(section)+".tif", rescale(colored_by_area, 1, anti_aliasing=False).astype('uint16'), imagej=True)
+            imwrite(locations.cell_val_dir+str(channel)+"/"+str(section)+".tif", labels.astype('uint32'))
+            #imwrite(locations.cell_val_dir+str(channel)+"/"+str(section)+".tif", rescale(colored_by_area, 1, anti_aliasing=False).astype('uint32'), imagej=True)
         else:
-            cv2.imwrite(locations.cell_val_dir+str(channel)+"/"+str(section)+".jpg", rescale(colored_by_area, 1/(validation_scale[0]), anti_aliasing=False).astype('uint16'), [cv2.IMWRITE_JPEG_QUALITY, settings.validation_jpeg_comp])   
+            
+            cv2.imwrite(locations.cell_val_dir+str(channel)+"/"+str(section)+".jpg", labels.astype('uint16'), [cv2.IMWRITE_JPEG_QUALITY, settings.validation_jpeg_comp])   
+            #cv2.imwrite(locations.cell_val_dir+str(channel)+"/"+str(section)+".jpg", rescale(colored_by_area, 1/(validation_scale[0]), anti_aliasing=False).astype('uint16'), [cv2.IMWRITE_JPEG_QUALITY, settings.validation_jpeg_comp])   
     
-    return filtered_table, colored_by_area
+    return filtered_table, labels
 
 def measure_and_create_validation_image_centroid_only(channel, section, raw_image, restored_image, labels, scale, saveval, cell_size, settings, locations):
     #validation_scale = list(map(int, (ast.literal_eval(settings['validation_scale']))))
@@ -691,7 +691,45 @@ def transform_cells(rawcells1, rawcells2, rawcells3, rawcells4, settings, locati
     return transformedcells1, transformedcells2, transformedcells3, transformedcells4
 
 
+def import_and_transform_raw_cells(settings, locations):
+    if settings.c1_cell_analysis == True:
+        rawcells1 = pd.read_csv(locations.raw_measurements_dir + "raw_cells_1.csv") 
+        process, transformedcells1 = transform_cell_locations(1, rawcells1, settings, locations)
+        transformedcells1.to_csv(locations.raw_measurements_dir + "transformed_cells_1.csv",index=False) #, compression='gzip')
+    
+    if settings.c2_cell_analysis == True:
+        rawcells2 = pd.read_csv(locations.raw_measurements_dir + 'raw_cells_2.csv')
+        process, transformedcells2 = transform_cell_locations(2, rawcells2, settings, locations)
+        transformedcells2.to_csv(locations.raw_measurements_dir + 'transformed_cells_2.csv',index=False) #, compression='gzip')
+        
+    if settings.c3_cell_analysis == True:
+       rawcells3 = pd.read_csv(locations.raw_measurements_dir + 'raw_cells_3.csv')
+       process, transformedcells3 = transform_cell_locations(3, rawcells3, settings, locations)
+       transformedcells3.to_csv(locations.raw_measurements_dir + 'transformed_cells_3.csv',index=False) #, compression='gzip')
+        
+    if settings.c4_cell_analysis == True:
+        rawcells4= pd.read_csv(locations.raw_measurements_dir + 'raw_cells_4.csv')
+        process, transformedcells4 = transform_cell_locations(4, rawcells4, settings, locations)
+        transformedcells4.to_csv(locations.raw_measurements_dir + 'transformed_cells_4.csv',index=False) #, compression='gzip')
+        
+    return transformedcells1, transformedcells2, transformedcells3, transformedcells4
 
+
+def import_transformed_cells(settings, locations):
+    if settings.c1_cell_analysis == True:
+        transformedcells1 = pd.read_csv(locations.raw_measurements_dir + "transformed_cells_1.csv") 
+    
+    if settings.c2_cell_analysis == True:
+        transformedcells2 = pd.read_csv(locations.raw_measurements_dir + 'transformed_cells_2.csv')
+        
+    if settings.c3_cell_analysis == True:
+        transformedcells3 = pd.read_csv(locations.raw_measurements_dir + 'transformed_cells_3.csv')
+        
+    if settings.c4_cell_analysis == True:
+        transformedcells4= pd.read_csv(locations.raw_measurements_dir + 'transformed_cells_4.csv')
+        
+    return transformedcells1, transformedcells2, transformedcells3, transformedcells4
+    
 
 @Timer(name= "transform_cells", text="Transforming cells processing time: {:.1f} seconds.\n")
 def transform_cell_locations(cell_channel, cell_table_input, settings, locations):
@@ -770,7 +808,7 @@ def annotate_all_cells(transformedcells1, transformedcells2, transformedcells3, 
 
     #channel 1
     print("Creating atlas region annotated count table for channel "+str(1)+" ...")
-    locations1, summary1, outofbounds1, outofbrain1 = cell_annotation_in_blocks(transformedcells1, locations)
+    locations1, summary1, outofbounds1, outofbrain1 = cell_annotation_gpu(transformedcells1, locations)
     
     locations1.to_csv(locations.cell_analysis_out_dir + "C1_Annotated_Cells.csv",index=False) #, compression='gzip')
 
@@ -778,21 +816,21 @@ def annotate_all_cells(transformedcells1, transformedcells2, transformedcells3, 
     
     #channel 2
     print("Creating atlas region annotated count table for channel "+str(2)+" ...")
-    locations2, summary2, outofbounds2, outofbrain2 = cell_annotation_in_blocks(transformedcells2, locations)
+    locations2, summary2, outofbounds2, outofbrain2 = cell_annotation_gpu(transformedcells2, locations)
     
     locations2.to_csv(locations.cell_analysis_out_dir + "C2_Annotated_Cells.csv",index=False) #, compression='gzip')
     summary2.to_csv(locations.cell_analysis_out_dir + "C2_Annotated_Cells_Summary.csv")
     
     #channel 3
     print("Creating atlas region annotated count table for channel "+str(3)+" ...")
-    locations3, summary3, outofbounds3, outofbrain3 = cell_annotation_in_blocks(transformedcells3, locations)
+    locations3, summary3, outofbounds3, outofbrain3 = cell_annotation_gpu(transformedcells3, locations)
     
     locations3.to_csv(locations.cell_analysis_out_dir + "C3_Annotated_Cells.csv",index=False) #, compression='gzip')
     summary3.to_csv(locations.cell_analysis_out_dir + "C3_Annotated_Cells_Summary.csv")
     
     #channel 4
     print("Creating atlas region annotated count table for channel "+str(4)+" ...") 
-    locations4, summary4, outofbounds4, outofbrain4 = cell_annotation_in_blocks(transformedcells4, locations)
+    locations4, summary4, outofbounds4, outofbrain4 = cell_annotation_gpu(transformedcells4, locations)
     
     locations4.to_csv(locations.cell_analysis_out_dir + "C4_Annotated_Cells.csv",index=False) #, compression='gzip')
     summary4.to_csv(locations.cell_analysis_out_dir + "C4_Annotated_Cells_Summary.csv")    
@@ -937,4 +975,102 @@ def cell_annotation_in_blocks(cells, locations):
     
     return locations_out, summary_out, outofbounds, outofbrain
         
+
+@Timer(name= "annotate_cells", text="Annotating cells processing time: {:0.1f} seconds.\n")
+def cell_annotation_gpu(cells, locations):
+        
+    #import region information
+    region_info = pd.read_csv("C:/Users/Luke_H/Desktop/BrainJ Atlas/ABA_CCF_25_2017/Atlas_Regions.csv")
+    
+    #import annotation image
+    #global annotations
+    annotations = imread(locations.annotations_image)
+    annotations_gpu = cp.array(annotations)
+    
+    # measure intensity in atlas
+    #convert df to xyz numpy array
+    atlas_coordinates = cells[['x', 'y','z']].values
+    
+    #convert to cupy array
+    atlas_coordinates_cp = cp.array(atlas_coordinates, dtype=cp.int32)
+    #mask for valid coordinates
+    valid_mask = (
+      (atlas_coordinates_cp[:, 0] >= 0) & (atlas_coordinates_cp[:, 0] < annotations_gpu.shape[2]) &
+      (atlas_coordinates_cp[:, 1] >= 0) & (atlas_coordinates_cp[:, 1] < annotations_gpu.shape[1]) &
+      (atlas_coordinates_cp[:, 2] >= 0) & (atlas_coordinates_cp[:, 2] < annotations_gpu.shape[0])
+    )
+
+    # Get the valid coordinates - this avoids issues with cells outside image space
+    valid_atlas_coordinates_cp = atlas_coordinates_cp[valid_mask]
+    
+    # Get the values at valid coordinates
+    valid_region_ids = annotations_gpu[valid_atlas_coordinates_cp[:, 2], valid_atlas_coordinates_cp[:, 1], valid_atlas_coordinates_cp[:, 0]]
+
+    # Initialize the result array with NaN
+    region_ids = cp.full(atlas_coordinates.shape[0], np.nan, dtype=np.float32)
+
+    # Assign the valid values to the result array
+    region_ids[valid_mask] = valid_region_ids
+    
+    
+    #measure
+    #region_ids = cp.zeros(atlas_coordinates.shape[0], dtype=annotations_gpu.dtype)
+    #for idx, coord in enumerate(atlas_coordinates):
+    #    x, y, z = coord
+    #    region_ids[idx] = annotations_gpu[z, y, x]
+    
+    outofbounds = int(np.sum(np.isnan(region_ids)))
+    outofbrain = int(np.count_nonzero(region_ids == 0))
+    
+    #add column for region id
+    cells['id'] = cp.asnumpy(region_ids)
+    
+    #create hemisphre columns in dataframe
+    cells = cells.assign(hemisphere=np.where(cells['x'] <= annotations.shape[2]/2, "Right", "Left"))
+    
+    #add information to columns based on region id - such as region abbreviation etc
+    region_info_subset = region_info[['id','output_id', 'acronym','parent_ID','parent_acronym']]
+    
+    cells = cells.merge(region_info_subset, on='id', how='left')
+    
+    #replace id with output_id and then drop the output_id column
+    cells['id'] = cells['output_id']
+    cells = cells.drop('output_id', axis=1)
+    cells = cells.drop('label', axis=1)
+    
+    # Create a summary table:
+    summary_table = cells.groupby(['id', 'hemisphere']).agg(count=('id', 'count'))
+    summary_table = summary_table.reset_index()
+    summary_table = summary_table.pivot(index='id', columns='hemisphere', values='count')
+    # Replace NaN values with zeros
+    summary_table = summary_table.fillna(0)
+    summary_table.columns = ['total_cells_right', 'total_cells_left']
+    summary_table = summary_table.reset_index()
+    
+    #add in region info for each row:
+    summary_table = summary_table.rename(columns={'id': 'output_id'})
+
+    summary_table = summary_table.merge(region_info, on='output_id', how='left')
+    summary_table = summary_table.drop('id', axis=1)
+    summary_table = summary_table.rename(columns={'output_id': 'id'})
+    
+    #add in new column "total cells"
+    total_cells = summary_table['total_cells_right'] + summary_table['total_cells_left']
+    summary_table.insert(3, 'total_cells', total_cells)
+    
+    #append outofbounds and out of pbrain
+    outofbounds_row = pd.DataFrame({'id': [0],'total_cells_right': [0],'total_cells_left': [0], 'total_cells': [outofbounds], 'name': ['outside atlas image']})
+    
+    outofbrain_row = pd.DataFrame({'id': [0],'total_cells_right': [0],'total_cells_left': [0], 'total_cells': [outofbrain], 'name': ['mapped outside of the brain']})
+
+    summary_table = pd.concat([summary_table, outofbounds_row], ignore_index=True)
+    summary_table = pd.concat([summary_table, outofbrain_row], ignore_index=True)
+
+          
+    print(f"{cells.shape[0]:,}"," cells mapped into the brain.")
+    print(outofbounds,"cells mapped out of the bounds of the atlas image.",outofbrain,"cells mapped outside of the brain.")
+    
+    return cells, summary_table, outofbounds, outofbrain
+        
+
     
