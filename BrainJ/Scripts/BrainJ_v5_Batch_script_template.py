@@ -33,7 +33,7 @@ main.check_gpu()
 #%% Provide Brain dir or dirs: - convert to loop
 
 
-brain_dirs = ["D:/BrainJ Datasets/Test Run A3/"]#,
+brain_dirs = ["D:/BrainJ Datasets/Test Run A3chan/"]#,
               #"D:/BrainJ Datasets/B4 Fast Test2/",
               #"D:/BrainJ Datasets/B4 Fast Test2/"]
 
@@ -48,22 +48,25 @@ for brain_dir in brain_dirs:
     locations.annotations_table = "C:/Users/Luke_H/Desktop/BrainJ Atlas/ABA_CCF_25_2017/Atlas_Regions.csv"
     settings.tiles_for_prediction = (2,2)
     settings.c1_cell_analysis = True
-
+    
+    locations.cell_analysis_out_dir
 
     #1: restore and detect cells
     #rawcells1, rawcells2, rawcells3, rawcells4 = imgan.cell_detection(settings, locations)
+    #rawcells = imgan.cell_detection(settings, locations)
 
     #2a: transform cells - use for normal processing - 2b or 2c are for reprocessing.
-    #transformedcells1, transformedcells2, transformedcells3, transformedcells4 = imgan.transform_cells(rawcells1, rawcells2, rawcells3, rawcells4, settings, locations)
+    #transformedcells = imgan.transform_cells_V2(rawcells, settings, locations)
     
     
     #2b: if there was an error with elastix import raw cells using the function below, then transform them
-    #transformedcells1, transformedcells2, transformedcells3, transformedcells4 = imgan.import_and_transform_raw_cells(settings, locations) 
+    #transformedcells = imgan.import_and_transform_raw_cells_V2(settings, locations) 
     
     #2c: or import already created transformed cells for reannotation, for example with a different atlas
-    transformedcells1, transformedcells2, transformedcells3, transformedcells4 = imgan.import_transformed_cells(settings, locations) 
+    transformedcells = imgan.import_transformed_cells_V2(settings, locations) 
     
     
     #Annotate cells and create tables
-    imgan.annotate_all_cells(transformedcells1, transformedcells2, transformedcells3, transformedcells4, settings, locations)
+    #imgan.annotate_all_cells(transformedcells1, transformedcells2, transformedcells3, transformedcells4, settings, locations)
+    imgan.annotate_all_cells(transformedcells, settings, locations)
 

@@ -66,6 +66,7 @@ from csbdeep.models import Config, CARE
 
 def cell_detection(settings, locations):
     #count sections and confirm equal in all folders
+    #modified to return a large df with a column "channel" that notes each channel a cell is located in.
       
     section_count = check_registered_sections(locations.registered_dir)
 
@@ -73,13 +74,9 @@ def cell_detection(settings, locations):
     #rawcells1, rawcells2, rawcells3, rawcells4 = process_sections(section_count, settings, locations)
     
     if settings.save_intermediate_data == True:
-        rawcells1.to_csv(locations.raw_measurements_dir + "raw_cells_1.csv",index=False)#, compression='gzip')
-        rawcells2.to_csv(locations.raw_measurements_dir + 'raw_cells_2.csv',index=False)#, compression='gzip')
-        rawcells3.to_csv(locations.raw_measurements_dir + 'raw_cells_3.csv',index=False)#, compression='gzip')
-        rawcells4.to_csv(locations.raw_measurements_dir + 'raw_cells_4.csv',index=False) #, compression='gzip')
-        
-         
-    return rawcells1, rawcells2, rawcells3, rawcells4
+        rawcells.to_csv(locations.raw_measurements_dir + 'raw_cells.csv',index=False) #, compression='gzip')
+                
+    return rawcells
 
 def check_registered_sections(registered_dir):
     global reg_channels
@@ -112,13 +109,13 @@ def process_sections(section_count, settings, locations):
 
       # Run a function that processes the sections:
       #approx 1min/section for 1.6µm resolution brain sections
-      rawcells1, rawcells2, rawcells3, rawcells4 = analyze_section(section, section_count, settings, locations, rawcells1, rawcells2, rawcells3, rawcells4)
+      rawcells = analyze_section(section, section_count, settings, locations, rawcells)
       print("Time elased = ", round(Timer.timers['section_processing']/60), "minutes. Estimated total time = ", round(Timer.timers['section_processing']/(section+1)*len(section_count)/60), "minutes.")
 
-    return rawcells1, rawcells2, rawcells3, rawcells4
+    return rawcells
 
 @Timer(name= "section_processing", text="Section processing time: {:.1f} seconds.")
-def analyze_section(section, section_count, settings, locations, rawcells1, rawcells2, rawcells3, rawcells4):    
+def analyze_section(section, section_count, settings, locations, rawcells):    
     #****had to make raw and restore images global for pipeline to work - didn't have this issue earlier?
     #find better way to to do this. shouldn't be an issue as they are called and used in the function??
     
@@ -126,18 +123,19 @@ def analyze_section(section, section_count, settings, locations, rawcells1, rawc
 
     #Load in raw channel files
     global c1_raw
-    c1_raw = imread(locations.registered_dir+"1/"+section_count[section])
-    c1_raw[c1_raw == 0] = settings.tissue_background
+    if settings.c1_cell_analysis == True:
+        c1_raw = imread(locations.registered_dir+"1/"+section_count[section])
+        c1_raw[c1_raw == 0] = settings.tissue_background
     
-    if reg_channels >= 2:
+    if settings.c2_cell_analysis == True:
         global c2_raw
         c2_raw = imread(locations.registered_dir+"2/"+section_count[section])
         c2_raw[c2_raw == 0] = settings.tissue_background
-    if reg_channels >= 3:
+    if settings.c3_cell_analysis == True:
         global c3_raw
         c3_raw = imread(locations.registered_dir+"3/"+section_count[section])  
         c3_raw[c3_raw == 0] = settings.tissue_background
-    if reg_channels >= 4:
+    if settings.c4_cell_analysis == True:
         global c4_raw
         c4_raw = imread(locations.registered_dir+"4/"+section_count[section])
         c4_raw[c4_raw == 0] = settings.tissue_background
@@ -206,7 +204,7 @@ def analyze_section(section, section_count, settings, locations, rawcells1, rawc
                                                                                              settings.c1_save_val_data,
                                                                                              settings.c1_cell_size,
                                                                                              settings, locations)
-            rawcells1 = pd.concat((rawcells1, cells1_slice_table))
+            rawcells = pd.concat((rawcells, cells1_slice_table))
         else:
             cells1_slice_table, cells1_colored_by_area = measure_and_create_validation_image_centroid_only(1, section, c1_raw, 
                                                                                                            c1_restore, 
@@ -215,7 +213,7 @@ def analyze_section(section, section_count, settings, locations, rawcells1, rawc
                                                                                                            settings.c1_save_val_data,
                                                                                                            settings.c1_cell_size,
                                                                                                            settings, locations)
-            rawcells1 = pd.concat((rawcells1, cells1_slice_table))
+            rawcells = pd.concat((rawcells, cells1_slice_table))
     if settings.c2_cell_analysis == True:
         print("Measuring channel 2...")
         if settings.c2_measure == True:
@@ -225,7 +223,7 @@ def analyze_section(section, section_count, settings, locations, rawcells1, rawc
                                                                                              settings.c2_save_val_data,
                                                                                              settings.c2_cell_size,
                                                                                              settings, locations)
-            rawcells2 = pd.concat((rawcells2, cells2_slice_table))
+            rawcells = pd.concat((rawcells, cells2_slice_table))
         else:
             cells2_slice_table, cells2_colored_by_area = measure_and_create_validation_image_centroid_only(2, section, c2_raw, 
                                                                                                            c2_restore, 
@@ -234,7 +232,7 @@ def analyze_section(section, section_count, settings, locations, rawcells1, rawc
                                                                                                            settings.c2_save_val_data,
                                                                                                            settings.c2_cell_size,
                                                                                                            settings, locations)
-            rawcells2 = pd.concat((rawcells2, cells2_slice_table))
+            rawcells = pd.concat((rawcells, cells2_slice_table))
     if settings.c3_cell_analysis == True:
         print("Measuring channel 3...")
         if settings.c3_measure == True:
@@ -244,7 +242,7 @@ def analyze_section(section, section_count, settings, locations, rawcells1, rawc
                                                                                              settings.c3_save_val_data,
                                                                                              settings.c3_cell_size,
                                                                                              settings, locations)
-            rawcells3 = pd.concat((rawcells3, cells3_slice_table))
+            rawcells = pd.concat((rawcells, cells3_slice_table))
         else:
             cells3_slice_table, cells3_colored_by_area = measure_and_create_validation_image_centroid_only(3, section, c3_raw, 
                                                                                                            c3_restore, 
@@ -253,7 +251,7 @@ def analyze_section(section, section_count, settings, locations, rawcells1, rawc
                                                                                                            settings.c3_save_val_data,
                                                                                                            settings.c3_cell_size,
                                                                                                            settings, locations)
-            rawcells3 = pd.concat((rawcells3, cells3_slice_table))
+            rawcells = pd.concat((rawcells, cells3_slice_table))
     if settings.c4_cell_analysis == True:
         print("Measuring channel 4...")
         if settings.c4_measure == True:
@@ -263,7 +261,7 @@ def analyze_section(section, section_count, settings, locations, rawcells1, rawc
                                                                                              settings.c4_save_val_data,
                                                                                              settings.c4_cell_size,
                                                                                              settings, locations)
-            rawcells4 = pd.concat((rawcells4, cells4_slice_table))
+            rawcells = pd.concat((rawcells, cells4_slice_table))
         else:
             cells4_slice_table, cells4_colored_by_area = measure_and_create_validation_image_centroid_only(4, section, c4_raw, 
                                                                                                            c4_restore, 
@@ -272,15 +270,12 @@ def analyze_section(section, section_count, settings, locations, rawcells1, rawc
                                                                                                            settings.c4_save_val_data,
                                                                                                            settings.c4_cell_size,
                                                                                                            settings, locations)
-            rawcells4 = pd.concat((rawcells4, cells4_slice_table))
+            rawcells = pd.concat((rawcells, cells4_slice_table))
     
     #round to 2 decimal places - could do this somewhere in the function?
-    rawcells1 = rawcells1.round(2)
-    rawcells2 = rawcells2.round(2)
-    rawcells3 = rawcells3.round(2)
-    rawcells4 = rawcells4.round(2)  
+    rawcells = rawcells.round(2)
         
-    return rawcells1, rawcells2, rawcells3, rawcells4
+    return rawcells
    
 def restore_and_segment(channel, section, rest_model_path, rest_type, seg_model, image, scale, preprocess, prob_thresh, normalize_range, saveval, settings, locations):
     #preprocess = list(map(int, (ast.literal_eval(preprocess))))
@@ -576,6 +571,8 @@ def measure_and_create_validation_image(channel, section, raw_image, restored_im
     volume_max = cell_size[1] 
 
     filtered_table = main_table[(main_table['area'] > volume_min) & (main_table['area'] < volume_max) ] 
+    
+    filtered_table.insert(loc=0, column='channel', value=channel)
 
     print("After filtering", len(filtered_table), "objects remain from total of", len(main_table))
     
@@ -639,6 +636,7 @@ def measure_and_create_validation_image_centroid_only(channel, section, raw_imag
     volume_max = cell_size[1] 
 
     filtered_table = main_table[(main_table['area'] > volume_min) & (main_table['area'] < volume_max) ] 
+    filtered_table.insert(loc=0, column='channel', value=channel)
 
     print("After filtering", len(filtered_table), "objects remain from total of", len(main_table))
     
@@ -671,7 +669,7 @@ def measure_and_create_validation_image_centroid_only(channel, section, raw_imag
 ##############################################################################
 
 
-def transform_cells(rawcells1, rawcells2, rawcells3, rawcells4, settings, locations):
+def transform_cells_V1(rawcells1, rawcells2, rawcells3, rawcells4, settings, locations):
     if settings.c1_cell_analysis == True:
         process, transformedcells1 = transform_cell_locations(1, rawcells1, settings, locations)
         transformedcells1.to_csv(locations.raw_measurements_dir + "transformed_cells_1.csv",index=False) #, compression='gzip')
@@ -691,7 +689,23 @@ def transform_cells(rawcells1, rawcells2, rawcells3, rawcells4, settings, locati
     return transformedcells1, transformedcells2, transformedcells3, transformedcells4
 
 
-def import_and_transform_raw_cells(settings, locations):
+def transform_cells_V2(rawcells, settings, locations):
+    process, transformedcells = transform_cell_locations_V2(rawcells, settings, locations)
+        
+    return transformedcells
+
+
+def import_and_transform_raw_cells_V2(settings, locations):
+    rawcells = pd.read_csv(locations.raw_measurements_dir + "raw_cells.csv") 
+    
+    process, transformedcells = transform_cell_locations_V2(rawcells, settings, locations)
+    
+    transformedcells.to_csv(locations.raw_measurements_dir + 'transformed_cells.csv',index=False) #, compression='gzip')
+    
+        
+    return transformedcells
+
+def import_and_transform_raw_cells_V1(settings, locations):
     if settings.c1_cell_analysis == True:
         rawcells1 = pd.read_csv(locations.raw_measurements_dir + "raw_cells_1.csv") 
         process, transformedcells1 = transform_cell_locations(1, rawcells1, settings, locations)
@@ -714,6 +728,11 @@ def import_and_transform_raw_cells(settings, locations):
         
     return transformedcells1, transformedcells2, transformedcells3, transformedcells4
 
+def import_transformed_cells_V2(settings, locations):
+
+    transformedcells = pd.read_csv(locations.raw_measurements_dir + "transformed_cells.csv") 
+
+    return transformedcells
 
 def import_transformed_cells(settings, locations):
     if settings.c1_cell_analysis == True:
@@ -793,11 +812,80 @@ def transform_cell_locations(cell_channel, cell_table_input, settings, locations
     #transformed_cells.to_csv(transformed_cell_dir + "outputpoints_"+str(cell_channel)+".txt",index=False)
         
     os.remove(locations.transformed_cell_dir + "outputpoints.txt")
+    os.remove(locations.raw_measurements_dir + "raw_cells_locations_"+str(cell_channel)+".txt")
 
     return transformix_process, cell_table
 
+@Timer(name= "transform_cells", text="Transforming cells processing time: {:.1f} seconds.\n")
+def transform_cell_locations_V2(cell_table_input, settings, locations):
+    input_res = settings.final_res
+    section_thickness = settings.section_thickness
+    atlas_res = settings.atlas_res
+    
+    total_points = cell_table_input.shape[0]
+    
+    cell_table = cell_table_input.copy(deep=True)
+       
+    cell_points_file = locations.raw_measurements_dir + "raw_cells_locations.txt"
+    
+    #resample points to atlas scale OriginalRes x ResampleRes
+    cell_table["x"] =  cell_table["x"] * (input_res/atlas_res[0])
+    cell_table["y"] =  cell_table["y"] * (input_res/atlas_res[1])
+    cell_table["z"] =  cell_table["z"] * (section_thickness/atlas_res[2])
 
-def annotate_all_cells(transformedcells1, transformedcells2, transformedcells3, transformedcells4, settings, locations):
+    
+    # export text file of cells and prepare of transformix
+    (cell_table.round(1)).to_csv(cell_points_file, sep=" ", columns=["x","y","z"], index = False, header=False)
+    
+    #Add point and total number of cells
+    main.line_prepender(cell_points_file,"point\n"+str(total_points))
+    
+    #run transformix
+    transformix_process = subprocess.Popen([settings.elastix_dir+"transformix.exe",
+                  "-def",
+                  cell_points_file,
+                  "-tp", 
+                  locations.transform_param,
+                  "-out",
+                  locations.transformed_cell_dir],
+                  stdout=PIPE, stderr=PIPE
+                )
+
+    # File can take a few seconds to appear - wait below up to 20 sec for file
+    time_to_wait = 1500
+    time_counter = 0
+    time.sleep(5)
+    while not os.path.exists(locations.transformed_cell_dir + "outputpoints.txt"):
+        time.sleep(10)
+        time_counter += 1
+        if time_counter > time_to_wait:break
+            
+            
+
+    # read in transformed points
+    transformed_cells = pd.read_csv(locations.transformed_cell_dir + "outputpoints.txt", sep=" ", header=None)
+    
+    while transformed_cells.shape[0] != total_points:
+        time.sleep(10)
+        transformed_cells = pd.read_csv(locations.transformed_cell_dir + "outputpoints.txt", sep=" ", header=None)
+    
+   
+    #extract XYZ and update table
+    #transformed_cells = transformed_cells.iloc[:,[32,33,34]] # extracts z,y,x columns as x,y,z
+    cell_table["x"] = transformed_cells.iloc[:,25].values #updates x with full res transformed Z coords
+    cell_table["y"] = transformed_cells.iloc[:,26].values #updates y with full res transformed y coords
+    cell_table["z"] = transformed_cells.iloc[:,27].values #updates z with full res transformed x coords
+    
+    #transformed_cells.to_csv(transformed_cell_dir + "outputpoints_"+str(cell_channel)+".txt",index=False)
+        
+    
+    if transformed_cells.shape[0] == total_points:
+        os.remove(locations.raw_measurements_dir + "raw_cells_locations.txt")
+        os.remove(locations.transformed_cell_dir + "outputpoints.txt")
+
+    return transformix_process, cell_table
+
+def annotate_all_cells(transformedcells, settings, locations):
     #Annotate Cells with atlas location - equivalent to AnnotatePoints
     #without Dask - the cell annotation takes around 1.6 min / million cells
     
@@ -807,33 +895,41 @@ def annotate_all_cells(transformedcells1, transformedcells2, transformedcells3, 
     #include estimated time 
 
     #channel 1
-    print("Creating atlas region annotated count table for channel "+str(1)+" ...")
-    locations1, summary1, outofbounds1, outofbrain1 = cell_annotation_gpu(transformedcells1, locations)
-    
-    locations1.to_csv(locations.cell_analysis_out_dir + "C1_Annotated_Cells.csv",index=False) #, compression='gzip')
+    if settings.c1_cell_analysis == True:
+        print("Creating atlas region annotated count table for channel "+str(1)+" ...")
+        create_annotated_count_table(transformedcells, locations, 1)
 
-    summary1.to_csv(locations.cell_analysis_out_dir + "C1_Annotated_Cells_Summary.csv")
-    
     #channel 2
-    print("Creating atlas region annotated count table for channel "+str(2)+" ...")
-    locations2, summary2, outofbounds2, outofbrain2 = cell_annotation_gpu(transformedcells2, locations)
+    if settings.c2_cell_analysis == True:
+        print("Creating atlas region annotated count table for channel "+str(2)+" ...")
+        create_annotated_count_table(transformedcells, locations, 2)
+        
+     #channel 3
+    if settings.c3_cell_analysis == True:
+        print("Creating atlas region annotated count table for channel "+str(3)+" ...")
+        create_annotated_count_table(transformedcells, locations, 3)
+         
+     #channel 4
+    if settings.c4_cell_analysis == True:
+        print("Creating atlas region annotated count table for channel "+str(4)+" ...")
+        create_annotated_count_table(transformedcells, locations, 4)
     
-    locations2.to_csv(locations.cell_analysis_out_dir + "C2_Annotated_Cells.csv",index=False) #, compression='gzip')
-    summary2.to_csv(locations.cell_analysis_out_dir + "C2_Annotated_Cells_Summary.csv")
+
     
-    #channel 3
-    print("Creating atlas region annotated count table for channel "+str(3)+" ...")
-    locations3, summary3, outofbounds3, outofbrain3 = cell_annotation_gpu(transformedcells3, locations)
-    
-    locations3.to_csv(locations.cell_analysis_out_dir + "C3_Annotated_Cells.csv",index=False) #, compression='gzip')
-    summary3.to_csv(locations.cell_analysis_out_dir + "C3_Annotated_Cells_Summary.csv")
-    
-    #channel 4
-    print("Creating atlas region annotated count table for channel "+str(4)+" ...") 
-    locations4, summary4, outofbounds4, outofbrain4 = cell_annotation_gpu(transformedcells4, locations)
-    
-    locations4.to_csv(locations.cell_analysis_out_dir + "C4_Annotated_Cells.csv",index=False) #, compression='gzip')
-    summary4.to_csv(locations.cell_analysis_out_dir + "C4_Annotated_Cells_Summary.csv")    
+def create_annotated_count_table(transformedcells, locations, channel):
+    # subset the transformed cells dataframe for the specified channel
+    transformedcells_subset = transformedcells[transformedcells['channel'] == channel]
+    transformedcells_subset = transformedcells_subset.drop('channel', axis=1)
+
+    # run the cell annotation GPU function
+    cell_locations, summary, outofbounds, outofbrain = cell_annotation_gpu(transformedcells_subset, locations)
+
+    # save the locations and summary dataframes to CSV files
+    cell_locations.to_csv(locations.cell_analysis_out_dir + f"C{channel}_Annotated_Cells.csv", index=False)
+    summary.to_csv(locations.cell_analysis_out_dir + f"C{channel}_Annotated_Cells_Summary.csv")
+
+    print(f"Created atlas region annotated count table for channel {channel}.")
+
 
 #@Timer(name= "annotate_cells", text="Annotating cells processing time: {:.1f} seconds.")
 def annotate_points_v3(transformed_cells, annotations, output_id_dict, acronym_dict, locations):
@@ -1022,6 +1118,7 @@ def cell_annotation_gpu(cells, locations):
     outofbounds = int(np.sum(np.isnan(region_ids)))
     outofbrain = int(np.count_nonzero(region_ids == 0))
     
+    
     #add column for region id
     cells['id'] = cp.asnumpy(region_ids)
     
@@ -1040,23 +1137,24 @@ def cell_annotation_gpu(cells, locations):
     
     # Create a summary table:
     summary_table = cells.groupby(['id', 'hemisphere']).agg(count=('id', 'count'))
-    summary_table = summary_table.reset_index()
-    summary_table = summary_table.pivot(index='id', columns='hemisphere', values='count')
-    # Replace NaN values with zeros
-    summary_table = summary_table.fillna(0)
-    summary_table.columns = ['total_cells_right', 'total_cells_left']
-    summary_table = summary_table.reset_index()
+    if summary_table.shape[0] >= 1:
+        summary_table = summary_table.reset_index()
+        summary_table = summary_table.pivot(index='id', columns='hemisphere', values='count')
+        # Replace NaN values with zeros
+        summary_table = summary_table.fillna(0)
+        summary_table.columns = ['total_cells_right', 'total_cells_left']
+        summary_table = summary_table.reset_index()
+        
+        #add in region info for each row:
+        summary_table = summary_table.rename(columns={'id': 'output_id'})
     
-    #add in region info for each row:
-    summary_table = summary_table.rename(columns={'id': 'output_id'})
-
-    summary_table = summary_table.merge(region_info, on='output_id', how='left')
-    summary_table = summary_table.drop('id', axis=1)
-    summary_table = summary_table.rename(columns={'output_id': 'id'})
-    
-    #add in new column "total cells"
-    total_cells = summary_table['total_cells_right'] + summary_table['total_cells_left']
-    summary_table.insert(3, 'total_cells', total_cells)
+        summary_table = summary_table.merge(region_info, on='output_id', how='left')
+        summary_table = summary_table.drop('id', axis=1)
+        summary_table = summary_table.rename(columns={'output_id': 'id'})
+        
+        #add in new column "total cells"
+        total_cells = summary_table['total_cells_right'] + summary_table['total_cells_left']
+        summary_table.insert(3, 'total_cells', total_cells)
     
     #append outofbounds and out of pbrain
     outofbounds_row = pd.DataFrame({'id': [0],'total_cells_right': [0],'total_cells_left': [0], 'total_cells': [outofbounds], 'name': ['outside atlas image']})
