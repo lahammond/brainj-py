@@ -64,6 +64,9 @@ for brain_dir in brain_dirs:
     #2c: or import already created transformed cells for reannotation, for example with a different atlas
     #transformedcells = imgan.import_transformed_cells_V2(settings, locations) 
     
+    #2d: or import already created transformed cells from earlier pipeline for reannotation, for example with a different atlas
+    #transformedcells = imgan.import_V1_transformed_cells_V2(settings, locations) 
+    
     
     #Annotate cells and create tables
     imgan.annotate_all_cells(transformedcells, settings, locations)

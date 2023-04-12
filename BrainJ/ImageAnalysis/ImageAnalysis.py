@@ -636,6 +636,8 @@ def measure_and_create_validation_image_centroid_only(channel, section, raw_imag
     volume_max = cell_size[1] 
 
     filtered_table = main_table[(main_table['area'] > volume_min) & (main_table['area'] < volume_max) ] 
+    
+    #add in channel column
     filtered_table.insert(loc=0, column='channel', value=channel)
 
     print("After filtering", len(filtered_table), "objects remain from total of", len(main_table))
@@ -733,6 +735,28 @@ def import_transformed_cells_V2(settings, locations):
     transformedcells = pd.read_csv(locations.raw_measurements_dir + "transformed_cells.csv") 
 
     return transformedcells
+
+def import_V1_transformed_cells_V2(settings, locations):
+    if settings.c1_cell_analysis == True:
+        transformedcells1 = pd.read_csv(locations.raw_measurements_dir + "transformed_cells_1.csv") 
+        transformedcells1.insert(loc=0, column='channel', value=1)
+        
+    if settings.c2_cell_analysis == True:
+        transformedcells2 = pd.read_csv(locations.raw_measurements_dir + 'transformed_cells_2.csv')
+        transformedcells2.insert(loc=0, column='channel', value=2)
+        
+    if settings.c3_cell_analysis == True:
+        transformedcells3 = pd.read_csv(locations.raw_measurements_dir + 'transformed_cells_3.csv')
+        transformedcells3.insert(loc=0, column='channel', value=3)
+        
+    if settings.c4_cell_analysis == True:
+        transformedcells4= pd.read_csv(locations.raw_measurements_dir + 'transformed_cells_4.csv')
+        transformedcells4.insert(loc=0, column='channel', value=4)
+    
+    transformedcells = pd.concat([transformedcells1, transformedcells2, transformedcells3, transformedcells4])  
+    
+    return transformedcells
+    
 
 def import_transformed_cells(settings, locations):
     if settings.c1_cell_analysis == True:
@@ -1025,7 +1049,7 @@ def annotate_points_v3(transformed_cells, annotations, output_id_dict, acronym_d
 
 @Timer(name= "annotate_cells", text="Annotating cells processing time: {:0.1f} seconds.\n")
 def cell_annotation_in_blocks(cells, locations):
-    print("Estimated time for annotating cells:", int(round(cells.shape[0]*0.0001,-1))/60,"minutes.");
+    print("Estimated time for annotating cells:", int(round(cells.shape[0]*0.0001,-1))60,"minutes.");
     #import annotation image
     global annotations
     annotations = imread(locations.annotations_image)
