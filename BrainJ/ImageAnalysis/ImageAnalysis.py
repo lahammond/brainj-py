@@ -1049,7 +1049,7 @@ def annotate_points_v3(transformed_cells, annotations, output_id_dict, acronym_d
 
 @Timer(name= "annotate_cells", text="Annotating cells processing time: {:0.1f} seconds.\n")
 def cell_annotation_in_blocks(cells, locations):
-    print("Estimated time for annotating cells:", int(round(cells.shape[0]*0.0001,-1))60,"minutes.");
+    #print("Estimated time for annotating cells:", int(round(cells.shape[0]*0.0001,-1))60,"minutes.");
     #import annotation image
     global annotations
     annotations = imread(locations.annotations_image)
