@@ -49,7 +49,7 @@ class Timer:
     
     timers: ClassVar = {} #dictionary to store accumulating times with different names
     name: Any = None
-    text: Any = "Processing time: {:0.1f} seconds."
+    text: Any = "Processing time: {:0.1f} minutes."
     #logger: Any = print
     _start_time: Any = field(default=None, init=False, repr=False)
    
@@ -100,7 +100,7 @@ class Timer:
         if self.name:
             self.timers[self.name] += elapsed_time
             
-        return elapsed_time
+        return elapsed_time/60
 
     #added to allow Context Manager
     #use by:

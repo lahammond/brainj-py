@@ -16,7 +16,8 @@ import os
 import numpy as np
 import pandas as pd
 import ast
-
+import sys
+import warnings
 
 import BrainJ.Main.Main as main
 import subprocess
@@ -64,27 +65,27 @@ from csbdeep.models import Config, CARE
 # Cell Segmentation Functions
 ##############################################################################
 
-def cell_detection(settings, locations):
+def cell_detection(settings, locations, logger):
     #count sections and confirm equal in all folders
     #modified to return a large df with a column "channel" that notes each channel a cell is located in.
       
-    section_count = check_registered_sections(locations.registered_dir)
+    section_count = check_registered_sections(locations.registered_dir, logger)
 
-    rawcells = process_sections(section_count, settings, locations)
+    rawcells = process_sections(section_count, settings, locations, logger)
     #rawcells1, rawcells2, rawcells3, rawcells4 = process_sections(section_count, settings, locations)
     
-    if settings.save_intermediate_data == True:
+    if settings.save_intermediate_data == True and os.path.isfile(locations.raw_measurements_dir + 'raw_cells.csv') is False:
         rawcells.to_csv(locations.raw_measurements_dir + 'raw_cells.csv',index=False) #, compression='gzip')
                 
     return rawcells
 
-def check_registered_sections(registered_dir):
+def check_registered_sections(registered_dir, logger):
     global reg_channels
     reg_channels = main.count_dirs(registered_dir)
 
     if reg_channels >= 1:
         section_count = [file_i for file_i in os.listdir(registered_dir+"1/") if file_i.endswith('.tif')]
-        print(len(section_count), "registered sections to be processed.")
+        logger.info(f"{len(section_count)} registered sections to be processed.\n")
         
     if reg_channels >= 2:
         if main.count_files(registered_dir+"2/") != len(section_count): print("Sections missing from", registered_dir,"2/")
@@ -97,25 +98,613 @@ def check_registered_sections(registered_dir):
     
     return section_count
 
-def process_sections(section_count, settings, locations):
+def process_sections(section_count, settings, locations, logger):
     #find a way to make these as needed elegantly
     #currently need all dataframes but should only require dfs being used
-    rawcells = pd.DataFrame()
+    
 
-    for section in range(len(section_count)):
-    #for section in range(1):
-
-      print('Processing section', section+1, "of" ,len(section_count))
-
-      # Run a function that processes the sections:
-      #approx 1min/section for 1.6µm resolution brain sections
-      rawcells = analyze_section(section, section_count, settings, locations, rawcells)
-      print("Time elased = ", round(Timer.timers['section_processing']/60), "minutes. Estimated total time = ", round(Timer.timers['section_processing']/(section+1)*len(section_count)/60), "minutes.")
+    # Run a function that processes the sections:
+    #approx 1min/section for 1.6µm resolution brain sections
+    rawcells = analyze_sections(settings, locations, logger)
+    #print("Time elased = ", round(Timer.timers['section_processing']/60), "minutes. Estimated total time = ", round(Timer.timers['section_processing']/(section+1)*len(section_count)/60), "minutes.")
 
     return rawcells
 
-@Timer(name= "section_processing", text="Section processing time: {:.1f} seconds.")
-def analyze_section(section, section_count, settings, locations, rawcells):    
+@Timer(name= "section_processing", text="Restoration, segmentation, and cell analysis processing time: {:.1f} minutes.\n")
+def analyze_sections(settings, locations, logger):    
+    #****had to make raw and restore images global for pipeline to work - didn't have this issue earlier?
+    #find better way to to do this. shouldn't be an issue as they are called and used in the function??   
+    #tissue_background required to fix high contrast around edges of tissue during restoration - fills zero values with this value
+
+    #Restore and segment each channel:
+    for i in range(1, 5):
+        if getattr(settings, f'c{i}_cell_analysis'):
+            if os.path.isfile(locations.cell_val_dir+'c'+str(i)+'_labels.npy') is False:
+                restore_and_segment_stack(i, getattr(settings, f'c{i}_rest_model_path'), 
+                                          getattr(settings, f'c{i}_rest_type'), 
+                                          getattr(settings, f'c{i}_seg_model'), 
+                                          getattr(settings, f'c{i}_scale'), 
+                                          getattr(settings, f'c{i}_preprocess'), 
+                                          getattr(settings, f'c{i}_prob_thresh'), 
+                                          getattr(settings, f'c{i}_normalize'),
+                                          getattr(settings, f'c{i}_save_val_data'), 
+                                          settings, locations, logger)
+            else:
+                logger.info(f"This channel has been processed. Please delete the file below and rerun to reprocess channel.\n {locations.cell_val_dir}c{str(i)}_labels.npy\n")
+            #print("Time elased for this channel = ", round(Timer.timers['section_processing']/60), "minutes.")
+        
+        
+
+    #Also - find sensible way of dealing with DAPI channel if necessary?
+    #create tables and validation images after images have been restored and segmented
+    rawcells = pd.DataFrame()
+    
+    for i in range(1, 5):
+        if getattr(settings, f'c{i}_cell_analysis'):
+            if os.path.isfile(locations.raw_measurements_dir + 'raw_cells.csv') is False:
+                if getattr(settings, f'c{i}_measure'):
+                    cells_table = measure_and_create_validation_stack(i, getattr(settings, f'c{i}_scale'), 
+                                          getattr(settings, f'c{i}_save_val_data'),
+                                          getattr(settings, f'c{i}_cell_size'),                                       
+                                          settings, locations, logger)
+                else:
+                    cells_table = measure_and_create_validation_stack_centroid_only(i, getattr(settings, f'c{i}_scale'), 
+                                          getattr(settings, f'c{i}_save_val_data'),
+                                          getattr(settings, f'c{i}_cell_size'),                                       
+                                          settings, locations, logger)
+                rawcells = pd.concat((rawcells, cells_table))
+            else:
+                logger.info(f"Cells have already been measured. Please delete the file below and rerun to remeasure cell intensities.\n{locations.raw_measurements_dir}raw_cells.csv \n")
+    
+    
+    #round to 2 decimal places - could do this somewhere in the function?
+    rawcells = rawcells.round(2)
+        
+    return rawcells
+
+def restore_and_segment_stack(channel, rest_model_path, rest_type, seg_model, scale, preprocess, prob_thresh, normalize_range, saveval, settings, locations, logger):
+    #1, settings.c1_rest_model_path, settings.c1_rest_type, settings.c1_seg_model,c1_raw, settings.c1_scale, settings.c1_preprocess,settings.c1_prob_thresh, settings.c1_normalize,settings.c1_save_val_data, settings, locations)
+    logger.info(f"Restoring and segmenting channel {channel}...")
+    #import series as a npy array
+    image_dir = locations.registered_dir+str(channel)+"/"
+    files = [f for f in os.listdir(image_dir) if f.endswith('.tif') or f.endswith('.tiff')]
+    # sort files to ensure they're in the correct order
+    files.sort()
+    # load all images into a list of numpy arrays
+    image = [imread(image_dir + f) for f in files]
+    # stack all images into a single numpy array
+    image = np.stack(image)
+    #remove zeroes to avoid care issues
+    image[image == 0] = settings.tissue_background
+        
+    tiles_for_prediction = settings.tiles_for_prediction
+    validation_scale = settings.validation_scale
+    nms_threshold = settings.stard_nms_thresh    
+    if saveval == True:
+        logger.info("Validation images will be saved.")
+
+    if len(image.shape) == 3:
+        shapeY = image.shape[1]
+        shapeX = image.shape[2]
+    else:
+        shapeY = image.shape[0]
+        shapeX = image.shape[1]
+        image = np.expand_dims(image, axis=0)
+        
+
+    #load restoration model
+    logger.info(f"Restoration model = {rest_model_path}")
+    if rest_model_path != None:
+        if rest_type[0] == 'care':
+            if os.path.isdir(rest_model_path) is False:
+                raise RuntimeError(rest_model_path, "not found, check settings and model directory")
+            rest_model = CARE(config=None, name=rest_model_path)
+            logger.info(f"Section image shape: {image.shape}")
+            logger.info(f"Scale used: {scale}")
+            #apply restoration model to channel
+            logger.info(f"Restoring image for channel {channel}")
+            
+            restored = np.empty((image.shape[0], image.shape[1], image.shape[2]), dtype=np.uint16)
+            
+            start_time = time.time()
+            for slice_idx in range(image.shape[0]):
+                loop_start_time = time.time()
+                
+                logger.info(f"\rRestoring slice {slice_idx+1} of {image.shape[0]}") #, end="\r", flush=True)
+                
+                slice_img = image[slice_idx]
+                with main.HiddenPrints():
+                    
+                    #rescale if necessary
+                    #tiles_for_prediction = tuple(x * trunc(scale) for x in tiles_for_prediction)
+    
+                    #restore image
+                    restoredslice = rest_model.predict(slice_img, axes='YX', n_tiles=tiles_for_prediction)
+    
+                    #convert to 16bit
+                    restoredslice = restoredslice.astype(np.uint16)
+                    #remove low intensities that are artifacts 
+                    #as restored images have varying backgrounds due to high variability in samples. Detect background with median, then add the cutoff
+                    #cutoff = np.median(restored) + rest_type[1]
+                    #restored[restored < cutoff] = 0
+                    background = restoration.rolling_ball(restoredslice, radius=5)
+                    restoredslice = restoredslice - background
+                    restored[slice_idx] = restoredslice
+                    
+                    loop_end_time = time.time()
+                    loop_duration = loop_end_time - loop_start_time
+                    total_elapsed_time = loop_end_time - start_time
+                    avg_time_per_loop = total_elapsed_time / (slice_idx+1)
+                    estimated_total_time = avg_time_per_loop * image.shape[0]
+
+                    logger.info(f"{loop_duration:.2f} seconds. Estimated total time: {estimated_total_time/60:.2f} minutes")
+
+            logger.info("Complete.\n")
+                
+        if rest_type[0] == 'tf':
+            logger.info(f"Image shape: {image.shape}")        
+            logger.info(f"Scale used: {scale}")
+            logger.info("Restoring image using loaded model...")
+            
+            if os.path.isfile(rest_model_path) is False:
+                raise RuntimeError(rest_model_path, "not found, check settings and model directory")
+
+            
+            model = load_model(rest_model_path, compile=False)
+            patch_size = 256
+            BACKBONE = rest_type[1]
+            threshold = 0.05
+            preprocess_input = sm.get_preprocessing(BACKBONE)
+            
+            restored = np.empty((image.shape[0], image.shape[1], image.shape[2]), dtype=np.uint8)
+            
+            start_time = time.time()
+            for slice_idx in range(image.shape[0]):
+                loop_start_time = time.time()
+                #logger.info(f"\rSegmenting slice {slice_idx+1} of {image.shape[0]}", end="\r", flush=True)
+                logger.info(f"\rSegmenting slice {slice_idx+1} of {image.shape[0]}")
+                # Process one slice at a time.
+                slice_img = image[slice_idx]
+                #pad as required to dvide by patch size
+                dim_x = slice_img.shape[1]
+                dim_y = slice_img.shape[0]
+            
+                upsize_x = (np.ceil(dim_x/patch_size)*patch_size) #Nearest size divisible by our patch size
+                pad_x = int(upsize_x - dim_x)
+    
+                upsize_y = (np.ceil(dim_y/patch_size)*patch_size) #Nearest size divisible by our patch size
+                pad_y = int(upsize_y - dim_y)
+                
+                padded_image = np.pad(slice_img, ((0,pad_y),(0,pad_x)), constant_values=0)
+    
+                #convert image to float32  
+                if channel == 1:
+                    padded_image = padded_image.astype(np.float32) #temporary until retrained model for 0-1norm
+                else:
+                    padded_image = (padded_image.astype('float32')) / 65535.
+                
+    
+                #patchify
+                patches = patchify(padded_image, (patch_size, patch_size), step=(patch_size,patch_size))  #Step=256 for 256 patches means no overlap
+    
+                #print(image.shape, padded_image.shape, patches.shape)   
+                
+                patched_prediction = []
+                for i in range(patches.shape[0]):
+                #for i in range(1):          
+                        patch = patches[i,:,:,:]
+                        #only one channel so need to convert to rgb
+                        patch = np.stack((patch,)*3, axis=-1)
+                        patch = np.squeeze(patch)
+                        #print(patch.shape)
+                        # run stack through prediction, update later to concantenate all images, and run as one stack
+                        #single_patch_img = np.stack((single_patch_img,)*1, axis=0)
+                        patch = preprocess_input(patch)
+                        with main.HiddenPrints():
+                            pred = model.predict(patch)
+                        pred = np.where(pred > threshold, 255, 0)
+                        #pred = np.argmax(pred, axis=3)
+                        #pred = pred[0, :,:]
+    
+                        patched_prediction.append(pred)
+                #turn list into np array
+                patched_prediction = np.array(patched_prediction)
+                predicted_patches_reshaped = np.reshape(patched_prediction, (patches.shape[0], patches.shape[1], 256,256) )
+                reconstructed_image = unpatchify(predicted_patches_reshaped, padded_image.shape)
+                restoredslice = reconstructed_image[0:dim_y, 0:dim_x]
+                restoredslice = restoredslice.astype(np.uint8)
+                restored[slice_idx] = restoredslice
+                
+                loop_end_time = time.time()
+                loop_duration = loop_end_time - loop_start_time
+                total_elapsed_time = loop_end_time - start_time
+                avg_time_per_loop = total_elapsed_time / (slice_idx+1)
+                estimated_total_time = avg_time_per_loop * image.shape[0]
+
+                #logger.info(f"Segmenting slice {slice_idx+1} of {image.shape[0]} took {loop_duration:.2f} seconds. Estimated total time: {estimated_total_time/60:.2f} minutes")
+                logger.info(f"{loop_duration:.2f} seconds. Estimated total time: {estimated_total_time/60:.2f} minutes")
+            logger.info("\nComplete\n")
+           
+    else:
+        logger.info("No restoration selected. Using raw data for detection.")
+        restored = image
+    
+    
+    #with main.HiddenPrints():
+        #preprocess if necessary
+
+    if preprocess[0] > 0:
+        logger.info(f"Using tophat filter: {preprocess[0]}")
+        filterSize =morphology.disk(preprocess[0])
+        # Applying the Top-Hat operation
+        restored = morphology.white_tophat(restored, filterSize)
+        
+    #remove  background
+    if preprocess[2] > 0:
+        restored = np.clip(restored.astype(np.int32) - preprocess[2], 0,65535).astype(np.uint16)
+    
+    #apply gaussian
+    if preprocess[1] > 0:
+        restored = filters.gaussian(restored, sigma=preprocess[1])
+
+    #label on restored image
+    logger.info(f"Detecting cells for channel {channel}")
+        
+    
+    
+    if seg_model[0] == 'StarDist2D':
+        model = StarDist2D.from_pretrained(seg_model[1])
+        
+        labels = np.empty((image.shape[0], image.shape[1], image.shape[2]), dtype=np.uint32)
+        
+        if scale > 1:
+            tiles_for_prediction = tuple(x * trunc(scale) for x in tiles_for_prediction)
+        
+        start_time = time.time()
+        for slice_idx in range(restored.shape[0]):
+            loop_start_time = time.time()
+            
+            logger.info(f"\rDetecting cells in slice {slice_idx+1} of {restored.shape[0]}")
+            #logger.info(f"\rDetecting cells in slice {slice_idx+1} of {restored.shape[0]}", end="\r", flush=True)
+            # Process one slice at a time.
+            slice_restored = restored[slice_idx]
+            
+            if scale > 1:
+                slice_restored = rescale(slice_restored, scale, anti_aliasing=False)
+                
+            with main.HiddenPrints():
+            
+                slice_labels, _ = model.predict_instances(normalize(slice_restored, normalize_range[0],normalize_range[1]),
+                                              axes='YX', 
+                                              prob_thresh=prob_thresh, #default 0.5 #for dapi 0.05
+                                              nms_thresh=nms_threshold,   #default 0.4 #for dapi 0.3
+                                              n_tiles=tiles_for_prediction,
+                                              show_tile_progress=False,
+                                              verbose=False)
+            # Rescale back for saving
+            if scale > 1:
+                
+                slice_restored = rescale(slice_restored, 1/scale, anti_aliasing=False)
+                
+                
+                slice_labels = cv2.resize(slice_labels, (shapeX,shapeY), interpolation=cv2.INTER_NEAREST)
+                
+                #labels = rescale(labels, 1/scale, anti_aliasing=True)
+                logger.info(f"restored shape is now: {restored.shape} Label shape is now: {labels.shape}")
+                
+            labels[slice_idx] = slice_labels
+            
+            loop_end_time = time.time()
+            loop_duration = loop_end_time - loop_start_time
+            total_elapsed_time = loop_end_time - start_time
+            avg_time_per_loop = total_elapsed_time / (slice_idx+1)
+            estimated_total_time = avg_time_per_loop * restored.shape[0]
+
+            logger.info(f"{loop_duration:.2f} seconds. Estimated total time: {estimated_total_time/60:.2f} minutes")
+            #logger.info(f"Detecting cells in slice {slice_idx+1} of {restored.shape[0]} took {loop_duration:.2f} seconds. Estimated total time: {estimated_total_time/60:.2f} minutes")
+        logger.info("\nComplete.\n")
+                
+    masks = labels>1
+    # FILTER BASED ON SIZE HERE
+
+    
+    logger.info(f"Masks size = {(round(sys.getsizeof(masks) / (1024**3),3))} GB of type 8bit")
+    logger.info(f"Labels size = {(round(sys.getsizeof(labels) / (1024**3),3))} GB of type {labels.dtype}")    
+
+    np.save(locations.cell_val_dir+'c'+str(channel)+'_labels.npy', labels)
+    np.save(locations.cell_val_dir+'c'+str(channel)+'_masks.npy', masks)
+    
+    
+    #save validation data:
+    if saveval == True:
+        logger.info(f"restored type is {restored.dtype} \n")
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            if settings.validation_format == "tif":
+                #imwrite(restore_val_dir+str(channel)+"/"+str(section)+".tif", restored.astype('uint16'), imagej=True)
+                #imwrite(restore_val_dir+str(channel)+"/"+str(section)+".tif", labels.astype('uint16'), imagej=True)
+                if rest_type[0] != 'tf':
+                    #restored = exposure.rescale_intensity(restored, in_range=(np.min(restored), np.max(restored)), out_range='uint16')
+                    restored.astype(np.uint16)
+                    
+                    for i, slice_2d in enumerate(restored):
+                        filename = f"section{i:04}.tif"
+                        filepath = locations.restore_val_dir+str(channel)+"/"+filename
+                        skimage.io.imsave(filepath, slice_2d.astype(np.uint16), plugin='tifffile', photometric='minisblack')
+                if rest_type[0] == 'tf':
+                    restored = exposure.rescale_intensity(restored, in_range=(np.min(channel), np.max(restored)), out_range='uint8')
+                    restored.astype(np.uint8)
+                    for i, slice_2d in enumerate(restored):
+                        filename = f"section{i:04}.tif"
+                        filepath = locations.restore_val_dir+str(channel)+"/"+filename
+                        skimage.io.imsave(filepath, slice_2d.astype(np.uint8), plugin='tifffile', photometric='minisblack')
+                    
+                for i, slice_2d in enumerate(labels):
+                    filename = f"section{i:04}.tif"
+                    filepath = locations.cell_val_dir+str(channel)+"/"+filename
+                    skimage.io.imsave(filepath, slice_2d.astype(np.float32), plugin='tifffile', photometric='minisblack')
+            #if validation_format == "tif" and scale > 1:
+                #imwrite(restore_val_dir+str(channel)+"/"+str(section)+".tif", rescale(restored, 1/scale, anti_aliasing=False).astype('uint16'), imagej=True)
+                #imwrite(cell_val_dir+str(channel)+"/"+str(section)+".tif", rescale(labels, 1/scale, anti_aliasing=False).astype('uint16'), imagej=True)
+                
+            if settings.validation_format != "tif":
+              
+                #scale down by validation scale and save as jpeg
+                #validation_scale = tuple(x * scale for x in validation_scale)
+                
+                #might not work - with larger files - may need to use skimage.io as above
+                cv2.imwrite(locations.restore_val_dir+str(channel)+"/"+str(channel)+".jpg", rescale(restored, 1/(validation_scale[0]), anti_aliasing=False).astype('uint16'), [cv2.IMWRITE_JPEG_QUALITY, settings.validation_jpeg_comp]) 
+                #save filtered labels colored by area
+                cv2.imwrite(locations.cell_val_dir+str(channel)+"/"+str(channel)+".jpg", rescale(labels, 1/(validation_scale[0]), anti_aliasing=False).astype('uint32'), [cv2.IMWRITE_JPEG_QUALITY, settings.validation_jpeg_comp]) 
+    logger.info("")    
+
+def imagelist(directory):
+    
+    # Check if the directory exists
+    if not os.path.exists(directory):
+        #print(f"The directory {directory} does not exist.")
+        return 0
+
+    # Check if the directory is empty
+    if not os.listdir(directory):
+        #print(f"The directory {directory} is empty.")
+        return 0
+
+    # If the directory exists and is not empty, get the list of files
+    files = [f for f in os.listdir(directory) if f.endswith('.tif') or f.endswith('.tiff')]
+
+    # Sort files to ensure they're in the correct order
+    files.sort()
+    
+    return files
+    
+    
+def measure_and_create_validation_stack(channel, scale, saveval, cell_size, settings, locations, logger):
+    logger.info(f"Analyzing cells in channel {channel}...")
+    #create lists for all relevant section images
+    c1_raw_list = imagelist(locations.registered_dir+str(1)+"/")
+    c2_raw_list = imagelist(locations.registered_dir+str(2)+"/")
+    c3_raw_list = imagelist(locations.registered_dir+str(3)+"/")
+    c4_raw_list = imagelist(locations.registered_dir+str(4)+"/")    
+    c1_restored_list = imagelist(locations.restore_val_dir+str(1)+"/")
+    c2_restored_list = imagelist(locations.restore_val_dir+str(2)+"/")
+    c3_restored_list = imagelist(locations.restore_val_dir+str(3)+"/")
+    c4_restored_list = imagelist(locations.restore_val_dir+str(4)+"/") 
+        
+    #import labels - if memory issues use memmap
+    labels = np.load(locations.cell_val_dir+'c'+str(channel)+'_labels.npy')
+    
+    #import masks - if memory issues, use memmap to load in slice thats required 
+    c1_masks = np.load(locations.cell_val_dir+'c'+str(1)+'_masks.npy') if os.path.isfile(locations.cell_val_dir+'c'+str(1)+'_masks.npy') else None
+    c2_masks = np.load(locations.cell_val_dir+'c'+str(2)+'_masks.npy') if os.path.isfile(locations.cell_val_dir+'c'+str(2)+'_masks.npy') else None
+    c3_masks = np.load(locations.cell_val_dir+'c'+str(3)+'_masks.npy') if os.path.isfile(locations.cell_val_dir+'c'+str(3)+'_masks.npy') else None
+    c4_masks = np.load(locations.cell_val_dir+'c'+str(4)+'_masks.npy') if os.path.isfile(locations.cell_val_dir+'c'+str(4)+'_masks.npy') else None
+
+    
+        
+    #print sizes to help with memory issues
+    logger.info(f"Labels data size = {str(round(sys.getsizeof(labels) / (1024**3),3))} GB. If data too large for memory - use memmap loading instead.")
+    logger.info(f"Masks data size = {str(round((sys.getsizeof(c1_masks)+sys.getsizeof(c2_masks)+sys.getsizeof(c3_masks)+sys.getsizeof(c4_masks)) / (1024**3),3))} GB")
+
+    validation_scale = settings.validation_scale
+    #scale = float(scale)
+    #saveval = int(saveval)
+    #print("labels", labels.shape)
+    #print("intensity", c1_raw.shape)
+    #channel 1 and properties
+    
+    raw_table = pd.DataFrame()
+    
+    #perform measurements slice by slice
+    for slice_idx in range(labels.shape[0]):
+        #logger.info(f"\rMeasuring slice {slice_idx+1} of {labels.shape[0]}", end="", flush=True)
+        logger.info(f"\rMeasuring slice {slice_idx+1} of {labels.shape[0]}")
+        # Process one slice at a time.
+        slice_labels = labels[slice_idx]
+        c1_mask_slice = c2_masks[slice_idx] if c1_masks is not None else None
+        c2_mask_slice = c2_masks[slice_idx] if c2_masks is not None else None
+        c3_mask_slice = c3_masks[slice_idx] if c3_masks is not None else None
+        c4_mask_slice = c4_masks[slice_idx] if c4_masks is not None else None
+        
+        #c1_raw = imread(locations.registered_dir +str(1)+"/" + c1_raw_list[slice_idx])
+        #c1_restored = imread(locations.restore_val_dir +str(1)+"/" + c1_restored_list[slice_idx])
+        
+        channels = ['c1','c2', 'c3', 'c4']
+        raw_images = {}
+        restored_images = {}
+
+        for ch, var in enumerate(channels):
+            raw = eval(var + '_raw_list')  # This will give the value of variables c2_raw, c3_raw, c4_raw
+            restored = eval(var + '_restored_list')
+            if raw != 0:
+                raw_images[var] = imread(locations.registered_dir + str(ch+1)+"/"+ raw[slice_idx])
+            #add back in if wanting to measure restored intensity
+            if restored != 0:
+                restored_images[var] = imread(locations.restore_val_dir + str(ch+1)+"/" + restored[slice_idx])
+        
+        main_table = pd.DataFrame(
+            measure.regionprops_table(
+                slice_labels,
+                intensity_image=raw_images['c1'],
+                properties=['label', 'centroid', 'area', 'mean_intensity'], #area is volume for 3D images
+            )
+        )
+        #print("slice index" , slice_idx+1)
+        #rename mean intensity
+        main_table.rename(columns={'mean_intensity':'C1_intensity'}, inplace=True)
+        main_table.rename(columns={'centroid-0':'y'}, inplace=True)
+        main_table.rename(columns={'centroid-1':'x'}, inplace=True)
+        main_table.insert(loc = 2, column='z', value=slice_idx+1)
+        main_table = main_table.reindex(columns=["label","x","y","z","area","C1_intensity"])
+    
+                
+        #measure intensity of other channels - check for low res dapi
+    
+        if os.path.isdir(locations.registered_dir+"2/") and settings.DAPI_channel != 2 and settings.c2_measure == 1 or (settings.DAPI_channel == 2 and settings.full_res_DAPI == True and settings.c2_measure == 1) == True and c2_raw_list != 0:
+            main_table = measure_int_and_add_column(raw_images['c2'], slice_labels, main_table, "C2_raw_int")
+            
+        if os.path.isdir(locations.registered_dir+"3/") and int(settings.DAPI_channel) != 3 and settings.c3_measure == 1 or (settings.DAPI_channel == 3 and settings.full_res_DAPI == True and settings.c3_measure == 1) == True and c3_raw_list != 0:
+            main_table = measure_int_and_add_column(raw_images['c3'], slice_labels, main_table, "C3_raw_int")
+    
+        if os.path.isdir(locations.registered_dir+"4/") and int(settings.DAPI_channel) != 4 and settings.c4_measure == 1 or (settings.DAPI_channel == 4 and settings.full_res_DAPI == True and settings.c4_measure == 1) == True and c4_raw_list != 0:
+            main_table = measure_int_and_add_column(raw_images['c4'], slice_labels, main_table, "C4_raw_int")
+
+    
+        #measure overlap # later on - include a check to not measure overlap for own channel
+        
+        if settings.c1_cell_analysis == True and c1_mask_slice is not None:
+            main_table = measure_int_and_add_column(restored_images['c1'], slice_labels, main_table, "C1_restore_int")
+            main_table = measure_int_and_add_column(c1_mask_slice, slice_labels, main_table, "C1_mask_overlap")
+            #main_table["C1_mask_overlap2"] =  main_table["C1_mask_overlap"] /  main_table["area"] 
+        if settings.c2_cell_analysis == True and c2_mask_slice is not None:
+            main_table = measure_int_and_add_column(restored_images['c2'], slice_labels, main_table, "C2_restore_int")
+            main_table = measure_int_and_add_column(c2_mask_slice, slice_labels, main_table, "C2_mask_overlap")
+            #main_table["C2_mask_overlap2"] =  main_table["C2_mask_overlap"] /  main_table["area"] 
+        if settings.c3_cell_analysis == True and c3_mask_slice is not None:
+            main_table = measure_int_and_add_column(restored_images['c3'], slice_labels, main_table, "C3_restore_int")
+            main_table = measure_int_and_add_column(c3_mask_slice, slice_labels, main_table, "C3_mask_overlap")
+            #main_table["C3_mask_overlap2"] =  main_table["C3_mask_overlap"] /  main_table["area"] 
+        if settings.c4_cell_analysis == True and c4_mask_slice is not None:
+            main_table = measure_int_and_add_column(restored_images['c4'], slice_labels, main_table, "C4_restore_int")
+            main_table = measure_int_and_add_column(c4_mask_slice, slice_labels, main_table, "C4_mask_overlap")
+            #main_table["C4_mask_overlap2"] =  main_table["C4_mask_overlap"] /  main_table["area"] 
+        
+        
+        #* IF SLOW - could potentially only measure in objects that match filtered table
+        #filter objects
+        volume_min = cell_size[0] 
+        volume_max = cell_size[1] 
+    
+        filtered_table = main_table[(main_table['area'] > volume_min) & (main_table['area'] < volume_max) ] 
+        
+        filtered_table.insert(loc=0, column='channel', value=channel)
+    
+        logger.info(f"  After filtering {len(filtered_table)} objects remain from total of {len(main_table)}")
+        
+        raw_table = pd.concat((filtered_table, raw_table))
+    
+        
+    #create colored by area image - don't need to color by area
+    #colored_by_area = util.map_array(
+    #    labels,
+    #    np.asarray(filtered_table['label']),
+    #    np.asarray(filtered_table['area']).astype(float),
+    #    #np.asarray(filtered_table['label']).astype(float),
+    #    )
+    
+    #create validation images
+    if saveval == True:
+    #scale down 2x2 then save as jpeg
+    #save restored image
+        #save filtered labels colored by area - overwrites labels - area helps to see different neighboring
+        #cells as different intensities, but all around same value - rather than thousands of values, potentially requiring 32bit.
+        
+        if settings.validation_format == "tif":
+            imwrite(locations.cell_val_dir+str(channel)+"/"f"section{slice_idx+1:04}.tif", labels.astype('uint32'))
+            #imwrite(locations.cell_val_dir+str(channel)+"/"+str(section)+".tif", rescale(colored_by_area, 1, anti_aliasing=False).astype('uint32'), imagej=True)
+        #else:
+            
+            #cv2.imwrite(locations.cell_val_dir+str(channel)+"/"+str(section)+".jpg", labels.astype('uint16'), [cv2.IMWRITE_JPEG_QUALITY, settings.validation_jpeg_comp])   
+            #cv2.imwrite(locations.cell_val_dir+str(channel)+"/"+str(section)+".jpg", rescale(colored_by_area, 1/(validation_scale[0]), anti_aliasing=False).astype('uint16'), [cv2.IMWRITE_JPEG_QUALITY, settings.validation_jpeg_comp])   
+    logger.info(f"Complete.\n")
+    
+    return raw_table
+
+
+def measure_and_create_validation_stack_centroid_only(channel, scale, saveval, cell_size, settings, locations, logger):
+    logger.info(f"Analyzing cells in channel {channel}...")
+    
+    #import labels - if memory issues use memmap
+    labels = np.load(locations.cell_val_dir+'c'+str(channel)+'_labels.npy')
+      
+        
+    #print sizes to help with memory issues
+    logger.info(f"Labels data size = {str(round(sys.getsizeof(labels) / (1024**3),3))} GB")
+    logger.info(f"If data too large for memory - use memmap loading instead.")
+
+    validation_scale = settings.validation_scale
+    
+    raw_table = pd.DataFrame()
+
+    
+    #perform measurements slice by slice
+    for slice_idx in range(labels.shape[0]):
+        #logger.info(f"\rMeasuring slice {slice_idx+1} of {labels.shape[0]}", end="", flush=True)
+        logger.info(f"\rMeasuring slice {slice_idx+1} of {labels.shape[0]}")
+        # Process one slice at a time.
+        slice_labels = labels[slice_idx]
+        
+        
+        main_table = pd.DataFrame(
+            measure.regionprops_table(
+                slice_labels,
+                intensity_image=slice_labels,
+                properties=['label', 'centroid', 'area'], #area is volume for 3D images
+            )
+        )
+
+        #rename mean intensity
+        main_table.rename(columns={'centroid-0':'y'}, inplace=True)
+        main_table.rename(columns={'centroid-1':'x'}, inplace=True)
+        main_table.insert(loc=2, column='z', value=slice_idx+1)
+        main_table = main_table.reindex(columns=["label","x","y","z","area"])
+    
+        
+        #* IF SLOW - could potentially only measure in objects that match filtered table
+        #filter objects
+        volume_min = cell_size[0] 
+        volume_max = cell_size[1] 
+    
+        filtered_table = main_table[(main_table['area'] > volume_min) & (main_table['area'] < volume_max) ] 
+        
+        filtered_table.insert(loc=0, column='channel', value=channel)
+    
+        logger.info(f"  After filtering {len(filtered_table)} objects remain from total of {len(main_table)}")
+        
+        raw_table = pd.concat((filtered_table, raw_table))
+    
+     
+    #create validation images
+    if saveval == True:
+    #scale down 2x2 then save as jpeg
+    #save restored image
+        #save filtered labels colored by area - overwrites labels - area helps to see different neighboring
+        #cells as different intensities, but all around same value - rather than thousands of values, potentially requiring 32bit.
+        
+        if settings.validation_format == "tif":
+            imwrite(locations.cell_val_dir+str(channel)+"/"f"section{slice_idx+1:04}.tif", labels.astype('uint32'))
+            #imwrite(locations.cell_val_dir+str(channel)+"/"+str(section)+".tif", rescale(colored_by_area, 1, anti_aliasing=False).astype('uint32'), imagej=True)
+        #else:
+            
+            #cv2.imwrite(locations.cell_val_dir+str(channel)+"/"+str(section)+".jpg", labels.astype('uint16'), [cv2.IMWRITE_JPEG_QUALITY, settings.validation_jpeg_comp])   
+            #cv2.imwrite(locations.cell_val_dir+str(channel)+"/"+str(section)+".jpg", rescale(colored_by_area, 1/(validation_scale[0]), anti_aliasing=False).astype('uint16'), [cv2.IMWRITE_JPEG_QUALITY, settings.validation_jpeg_comp])   
+    logger.info(f"Complete.\n")
+    
+    return raw_table
+
+@Timer(name= "section_processing", text="Section processing time: {:.1f} minutes.")
+def analyze_section_2D(section, section_count, settings, locations, rawcells):    
     #****had to make raw and restore images global for pipeline to work - didn't have this issue earlier?
     #find better way to to do this. shouldn't be an issue as they are called and used in the function??
     
@@ -333,6 +922,7 @@ def restore_and_segment(channel, section, rest_model_path, rest_type, seg_model,
             model = load_model(rest_model_path, compile=False)
             patch_size = 256
             BACKBONE = rest_type[1]
+            threshold = 0.05
             preprocess_input = sm.get_preprocessing(BACKBONE)
             
             #pad as required to dvide by patch size
@@ -348,10 +938,14 @@ def restore_and_segment(channel, section, rest_model_path, rest_type, seg_model,
             padded_image = np.pad(image, ((0,pad_y),(0,pad_x)), constant_values=0)
 
             #convert image to float32  
-            padded_image = (padded_image.astype('float32')) / 65535.
+            if channel == 1:
+                padded_image = padded_image.astype(np.float32) #temporary until retrained model for 0-1norm
+            else:
+                padded_image = (padded_image.astype('float32')) / 65535.
+            
 
             #patchify
-            patches = patchify(padded_image, (patch_size, patch_size), step=patch_size)  #Step=256 for 256 patches means no overlap
+            patches = patchify(padded_image, (patch_size, patch_size), step=(patch_size,patch_size))  #Step=256 for 256 patches means no overlap
 
             print(image.shape, padded_image.shape, patches.shape)   
             
@@ -361,11 +955,14 @@ def restore_and_segment(channel, section, rest_model_path, rest_type, seg_model,
                     patch = patches[i,:,:,:]
                     #only one channel so need to convert to rgb
                     patch = np.stack((patch,)*3, axis=-1)
+                    patch = np.squeeze(patch)
                     #print(patch.shape)
                     # run stack through prediction, update later to concantenate all images, and run as one stack
                     #single_patch_img = np.stack((single_patch_img,)*1, axis=0)
+                    patch = preprocess_input(patch)
                     with main.HiddenPrints():
                         pred = model.predict(patch)
+                    pred = np.where(pred > threshold, 255, 0)
                     #pred = np.argmax(pred, axis=3)
                     #pred = pred[0, :,:]
 
@@ -379,6 +976,7 @@ def restore_and_segment(channel, section, rest_model_path, rest_type, seg_model,
             #restored = exposure.rescale_intensity(restored, in_range=(np.min(restored), np.max(restored)), out_range='float32')
             #restored = exposure.rescale_intensity(restored, in_range=(np.min(restored), np.max(restored*2)), out_range='uint16')
             #restored = restored.astype(np.uint16)
+    
             
     else:
         print("No restoration selected. Using raw data for detection.")
@@ -431,7 +1029,7 @@ def restore_and_segment(channel, section, rest_model_path, rest_type, seg_model,
 
         labels = cv2.resize(labels, (shape1,shape0), interpolation=cv2.INTER_NEAREST)
         #labels = rescale(labels, 1/scale, anti_aliasing=True)
-        print("restored shape is now: ", restored.shape, " Label shape is now: ", labels.shape)
+        #print("restored shape is now: ", restored.shape, " Label shape is now: ", labels.shape)
     
     
     masks = labels>1
@@ -444,10 +1042,8 @@ def restore_and_segment(channel, section, rest_model_path, rest_type, seg_model,
     #save validation data:
     if saveval == True:
         print("restored type is" + str(restored.dtype))
-        if restored.dtype != "uint16":
-            restored = exposure.rescale_intensity(restored, in_range=(np.min(restored), np.max(restored)), out_range='uint16')
-
-            restored.astype(np.uint16)
+       
+        
 
         
         print("labels type is" + str(labels.dtype))
@@ -455,8 +1051,15 @@ def restore_and_segment(channel, section, rest_model_path, rest_type, seg_model,
         if settings.validation_format == "tif":
             #imwrite(restore_val_dir+str(channel)+"/"+str(section)+".tif", restored.astype('uint16'), imagej=True)
             #imwrite(restore_val_dir+str(channel)+"/"+str(section)+".tif", labels.astype('uint16'), imagej=True)
-
-            skimage.io.imsave(locations.restore_val_dir+str(channel)+"/"+str(section)+".tif", restored.astype(np.uint16), plugin='tifffile', photometric='minisblack')
+            if restored.dtype != "uint16" and rest_type[0] != 'tf':
+                #restored = exposure.rescale_intensity(restored, in_range=(np.min(restored), np.max(restored)), out_range='uint16')
+                restored.astype(np.uint16)
+                skimage.io.imsave(locations.restore_val_dir+str(channel)+"/"+str(section)+".tif", restored.astype(np.uint16), plugin='tifffile', photometric='minisblack')
+            if rest_type[0] == 'tf':
+                restored = exposure.rescale_intensity(restored, in_range=(np.min(restored), np.max(restored)), out_range='uint8')
+                restored.astype(np.uint8)
+                skimage.io.imsave(locations.restore_val_dir+str(channel)+"/"+str(section)+".tif", restored.astype(np.uint8), plugin='tifffile', photometric='minisblack')
+                
             skimage.io.imsave(locations.cell_val_dir+str(channel)+"/"+str(section)+".tif", labels.astype(np.uint16), plugin='tifffile', photometric='minisblack')
         #if validation_format == "tif" and scale > 1:
             #imwrite(restore_val_dir+str(channel)+"/"+str(section)+".tif", rescale(restored, 1/scale, anti_aliasing=False).astype('uint16'), imagej=True)
@@ -665,6 +1268,27 @@ def measure_and_create_validation_image_centroid_only(channel, section, raw_imag
     
     return filtered_table, colored_by_area
 
+def pad_image(image, divisible_by=(256, 256), pad_value=0):
+    # Calculate padding for each axis
+    padding = [(div - (dim % div)) % div for dim, div in zip(image.shape, divisible_by)]
+
+    # Calculate padding for each edge
+    padding = [(p // 2, p - (p // 2)) for p in padding]
+    print(padding)
+
+    # Pad the image
+    padded_image = np.pad(image, padding, mode='constant', constant_values=pad_value)
+
+    return padded_image, padding
+
+def unpad_image(padded_image, original_shape, padding):
+    # Calculate the slices to remove padding
+    slices = [slice(p[0], p[0] + original_shape[i]) for i, p in enumerate(padding)]
+
+    # Crop the image to original size
+    unpadded_image = padded_image[tuple(slices)]
+
+    return unpadded_image
 
 ##############################################################################
 # Atlas Mapping Functions
@@ -690,22 +1314,44 @@ def transform_cells_V1(rawcells1, rawcells2, rawcells3, rawcells4, settings, loc
         
     return transformedcells1, transformedcells2, transformedcells3, transformedcells4
 
+@Timer(name= "transform_cells_all", text="Transforming cells processing time: {:0.1f} minutes.\n")
+def transform_cells_V2(rawcells, settings, locations, logger):
+    logger.info(f"\nMapping cells to atlas...\n")
+    if os.path.isfile(locations.annotations_table) is False: 
+        raise RuntimeError("Atlas files not found, check atlas directory in the Analysis_Settings.yaml file")
 
-def transform_cells_V2(rawcells, settings, locations):
-    process, transformedcells = transform_cell_locations_V2(rawcells, settings, locations)
+        
+    if os.path.isfile(locations.raw_measurements_dir + 'transformed_cells.csv') is False:
+        process, transformedcells = transform_cell_locations_V2(rawcells, settings, locations, logger)
+        
+        transformedcells.to_csv(locations.raw_measurements_dir + 'transformed_cells.csv',index=False) #, compression='gzip')
+        
+    else:
+        logger.info(f"{locations.raw_measurements_dir}transformed_cells.csv already exists, cells have been transformed. Please delete this file to transform again, if necessary.\n")
+        transformedcells = pd.read_csv(locations.raw_measurements_dir + 'transformed_cells.csv')
         
     return transformedcells
 
+@Timer(name= "transform_cells_all", text="Transforming cells processing time: {:0.1f} minutes.\n")
+def import_and_transform_raw_cells_V2(settings, locations, logger):
+    logger.info(f"\nMapping cells to atlas...\n")
+    if os.path.isfile(locations.annotations_table) is False: 
+        raise RuntimeError("Atlas files not found, check atlas directory in the Analysis_Settings.yaml file")
 
-def import_and_transform_raw_cells_V2(settings, locations):
-    rawcells = pd.read_csv(locations.raw_measurements_dir + "raw_cells.csv") 
     
-    process, transformedcells = transform_cell_locations_V2(rawcells, settings, locations)
+    if os.path.isfile(locations.raw_measurements_dir + 'transformed_cells.csv') is False:
+        rawcells = pd.read_csv(locations.raw_measurements_dir + "raw_cells.csv") 
     
-    transformedcells.to_csv(locations.raw_measurements_dir + 'transformed_cells.csv',index=False) #, compression='gzip')
+        process, transformedcells = transform_cell_locations_V2(rawcells, settings, locations, logger)
     
+        transformedcells.to_csv(locations.raw_measurements_dir + 'transformed_cells.csv',index=False) #, compression='gzip')
         
-    return transformedcells
+    else:
+        logger.info(f"{locations.raw_measurements_dir}transformed_cells.csv already exists, cells have been transformed. Please delete this file to transform again, if necessary.\n")
+        transformedcells = pd.read_csv(locations.raw_measurements_dir + 'transformed_cells.csv')
+    
+    return transformedcells       
+    
 
 def import_and_transform_raw_cells_V1(settings, locations):
     if settings.c1_cell_analysis == True:
@@ -840,8 +1486,9 @@ def transform_cell_locations(cell_channel, cell_table_input, settings, locations
 
     return transformix_process, cell_table
 
-@Timer(name= "transform_cells", text="Transforming cells processing time: {:.1f} seconds.\n")
-def transform_cell_locations_V2(cell_table_input, settings, locations):
+@Timer(name= "transform_cells", text="Transforming this channel took: {:0.1f} minutes.\n")
+def transform_cell_locations_V2(cell_table_input, settings, locations, logger):
+
     input_res = settings.final_res
     section_thickness = settings.section_thickness
     atlas_res = settings.atlas_res
@@ -863,6 +1510,23 @@ def transform_cell_locations_V2(cell_table_input, settings, locations):
     
     #Add point and total number of cells
     main.line_prepender(cell_points_file,"point\n"+str(total_points))
+    #print("Performing transformation...")
+    
+    #before running transformix, ensure transform param file is correct
+    
+    with open(locations.transform_param, "r") as file:
+        lines = file.readlines()
+    
+    # Loop over the lines in the file
+    for i, line in enumerate(lines):
+        # If the line starts with the desired string and contains the initial directory
+        if line.strip().startswith("(InitialTransformParametersFileName"):
+            # Replace the initial directory with the new directory
+            lines[i] = "(InitialTransformParametersFileName \""+locations.transform_param[:-5]+"0.txt\")\n"
+    
+    # Write the file out again
+    with open(locations.transform_param, "w") as file:
+        file.writelines(lines)
     
     #run transformix
     transformix_process = subprocess.Popen([settings.elastix_dir+"transformix.exe",
@@ -874,14 +1538,21 @@ def transform_cell_locations_V2(cell_table_input, settings, locations):
                   locations.transformed_cell_dir],
                   stdout=PIPE, stderr=PIPE
                 )
-
+    
     # File can take a few seconds to appear - wait below up to 20 sec for file
     time_to_wait = 1500
     time_counter = 0
     time.sleep(5)
+    logger.info(f"Printing end of run log in case of issues:")
+    with open(locations.transformed_cell_dir+'transformix.log', 'r') as file:
+        lines = file.readlines()
+        logger.info(f"{lines[-6:]}\n")  # print the last two lines
+    
     while not os.path.exists(locations.transformed_cell_dir + "outputpoints.txt"):
         time.sleep(10)
         time_counter += 1
+        
+        logger.info(f"\rWaiting for transformation output {time_counter*10} seconds and counting...")# end="\r", flush=True)
         if time_counter > time_to_wait:break
             
             
@@ -901,7 +1572,7 @@ def transform_cell_locations_V2(cell_table_input, settings, locations):
     cell_table["z"] = transformed_cells.iloc[:,27].values #updates z with full res transformed x coords
     
     #transformed_cells.to_csv(transformed_cell_dir + "outputpoints_"+str(cell_channel)+".txt",index=False)
-        
+    logger.info(f"Cell locations mapped to atlas.")    
     
     if transformed_cells.shape[0] == total_points:
         os.remove(locations.raw_measurements_dir + "raw_cells_locations.txt")
@@ -909,50 +1580,55 @@ def transform_cell_locations_V2(cell_table_input, settings, locations):
 
     return transformix_process, cell_table
 
-def annotate_all_cells(transformedcells, settings, locations):
+@Timer(name= "annotate_cells", text="Annotating all cells processing time: {:0.1f} minutes.\n")
+def annotate_all_cells(transformedcells, settings, locations, logger):
     #Annotate Cells with atlas location - equivalent to AnnotatePoints
     #without Dask - the cell annotation takes around 1.6 min / million cells
-    
+    print("Performing atlas annotations and creating final results tables...\n")
     #*** Rewrite with dask
     # note that string heavy dataframes aren't speed up much by using dask dataframes. 
     
     #include estimated time 
 
     #channel 1
-    if settings.c1_cell_analysis == True:
-        print("Creating atlas region annotated count table for channel "+str(1)+" ...")
-        create_annotated_count_table(transformedcells, locations, 1)
-
+    if settings.c1_cell_analysis == True and os.path.isfile(locations.cell_analysis_out_dir + "C1_Annotated_Cells.csv") is False:
+        logger.info(f"Creating atlas region annotated count table for channel 1 ...")
+        create_annotated_count_table(transformedcells, locations, 1, logger)
+    else: logger.info(f"Atlas annotations already complete for channel 1")
     #channel 2
-    if settings.c2_cell_analysis == True:
-        print("Creating atlas region annotated count table for channel "+str(2)+" ...")
-        create_annotated_count_table(transformedcells, locations, 2)
-        
+    if settings.c2_cell_analysis == True and os.path.isfile(locations.cell_analysis_out_dir + "C2_Annotated_Cells.csv") is False:
+        logger.info(f"Creating atlas region annotated count table for channel 2 ...")
+        create_annotated_count_table(transformedcells, locations, 2, logger)
+    
+    else: logger.info(f"Atlas annotations already complete for channel 2")
      #channel 3
-    if settings.c3_cell_analysis == True:
-        print("Creating atlas region annotated count table for channel "+str(3)+" ...")
-        create_annotated_count_table(transformedcells, locations, 3)
+    if settings.c3_cell_analysis == True and os.path.isfile(locations.cell_analysis_out_dir + "C3_Annotated_Cells.csv") is False:
+        logger.info(f"Creating atlas region annotated count table for channel 3 ...")
+        create_annotated_count_table(transformedcells, locations, 3, logger)
+    else: logger.info(f"Atlas annotations already complete for channel 3")
          
      #channel 4
-    if settings.c4_cell_analysis == True:
-        print("Creating atlas region annotated count table for channel "+str(4)+" ...")
-        create_annotated_count_table(transformedcells, locations, 4)
+    if settings.c4_cell_analysis == True and os.path.isfile(locations.cell_analysis_out_dir + "C4_Annotated_Cells.csv") is False:
+        logger.info(f"Creating atlas region annotated count table for channel 4 ...")
+        create_annotated_count_table(transformedcells, locations, 4, logger)
+    else: logger.info(f"Atlas annotations already complete for channel 4")
+    
+    logger.info(f"\nAnalysis Complete.")
+   
     
 
     
-def create_annotated_count_table(transformedcells, locations, channel):
+def create_annotated_count_table(transformedcells, locations, channel, logger):
     # subset the transformed cells dataframe for the specified channel
     transformedcells_subset = transformedcells[transformedcells['channel'] == channel]
     transformedcells_subset = transformedcells_subset.drop('channel', axis=1)
 
     # run the cell annotation GPU function
-    cell_locations, summary, outofbounds, outofbrain = cell_annotation_gpu(transformedcells_subset, locations)
+    cell_locations, summary, outofbounds, outofbrain = cell_annotation_gpu(transformedcells_subset, locations, logger)
 
     # save the locations and summary dataframes to CSV files
     cell_locations.to_csv(locations.cell_analysis_out_dir + f"C{channel}_Annotated_Cells.csv", index=False)
     summary.to_csv(locations.cell_analysis_out_dir + f"C{channel}_Annotated_Cells_Summary.csv")
-
-    print(f"Created atlas region annotated count table for channel {channel}.")
 
 
 #@Timer(name= "annotate_cells", text="Annotating cells processing time: {:.1f} seconds.")
@@ -1096,8 +1772,7 @@ def cell_annotation_in_blocks(cells, locations):
     return locations_out, summary_out, outofbounds, outofbrain
         
 
-@Timer(name= "annotate_cells", text="Annotating cells processing time: {:0.1f} seconds.\n")
-def cell_annotation_gpu(cells, locations):
+def cell_annotation_gpu(cells, locations, logger):
         
     #import region information
     region_info = pd.read_csv("C:/Users/Luke_H/Desktop/BrainJ Atlas/ABA_CCF_25_2017/Atlas_Regions.csv")
@@ -1189,8 +1864,8 @@ def cell_annotation_gpu(cells, locations):
     summary_table = pd.concat([summary_table, outofbrain_row], ignore_index=True)
 
           
-    print(f"{cells.shape[0]:,}"," cells mapped into the brain.")
-    print(outofbounds,"cells mapped out of the bounds of the atlas image.",outofbrain,"cells mapped outside of the brain.")
+    logger.info(f"{cells.shape[0]:,} cells mapped into the brain.")
+    logger.info(f"{outofbounds} cells mapped out of the bounds of the atlas image. {outofbrain} cells mapped outside of the brain.")
     
     return cells, summary_table, outofbounds, outofbrain
         
