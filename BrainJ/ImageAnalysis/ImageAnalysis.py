@@ -237,7 +237,7 @@ def restore_and_segment_stack(channel, rest_model_path, rest_type, seg_model, sc
                     avg_time_per_loop = total_elapsed_time / (slice_idx+1)
                     estimated_total_time = avg_time_per_loop * image.shape[0]
 
-                    logger.info(f"{loop_duration:.2f} seconds. Estimated total time: {estimated_total_time/60:.2f} minutes")
+                    logger.info(f"{loop_duration:.2f} seconds. Estimated total time: {estimated_total_time:.2f} minutes")
 
             logger.info("Complete.\n")
                 

@@ -4,6 +4,8 @@
 #- Channels are enhanced using CARE networks trained on 1.6µm data and segmented using U-Nets and StarDist.
 #- csv files of raw, transformed and mapped cells are generated in addition to optional intermediate images for data checking
 
+__version__   = "1.0.1"
+__date__      = "20 July, 2023"
 __author__    = 'Luke Hammond <lh2881@columbia.edu>'
 __license__   = 'MIT License (see LICENSE)'
 __copyright__ = 'Copyright © 2022 by Luke Hammond'
@@ -11,9 +13,6 @@ __webpage__   = 'http://cellularimaging.org'
 __download__  = 'http://www.github.com/lahmmond/BrainJ-Python'
 
 ##%%
-
-Version = "1.0.1"
-Date = "20 July, 2023"
 
 #Add the BrainJ install directory to the path
 import sys
@@ -43,7 +42,7 @@ brain_dirs = ["D:/Project_Data/BrainJ Datasets/FastTest/"]#,
               #"D:/BrainJ Datasets/etc/"]
 
 for brain_dir in brain_dirs:
-    # Create a logger
+    
     # Create a logger
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.DEBUG)
@@ -70,8 +69,8 @@ for brain_dir in brain_dirs:
     #original_stdout = sys.stdout 
     #sys.stdout = open(logname, 'w')
     
-    logger.info("BrainJ Version: "+Version)
-    logger.info("Release Date: "+Date+"\n")    
+    logger.info("BrainJ Version: "+__version__)
+    logger.info("Release Date: "+__date__+"\n")    
     logger.info("Processing brain: "+brain_dir+"\n")
 
     #Load in experiment parameters and analysis settings   
