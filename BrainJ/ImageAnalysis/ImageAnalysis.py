@@ -457,7 +457,7 @@ def restore_and_segment_stack(channel, rest_model_path, rest_type, seg_model, sc
                 cv2.imwrite(locations.restore_val_dir+str(channel)+"/"+str(channel)+".jpg", rescale(restored, 1/(validation_scale[0]), anti_aliasing=False).astype('uint16'), [cv2.IMWRITE_JPEG_QUALITY, settings.validation_jpeg_comp]) 
                 #save filtered labels colored by area
                 cv2.imwrite(locations.cell_val_dir+str(channel)+"/"+str(channel)+".jpg", rescale(labels, 1/(validation_scale[0]), anti_aliasing=False).astype('uint32'), [cv2.IMWRITE_JPEG_QUALITY, settings.validation_jpeg_comp]) 
-    logger.info("")    
+    logger.info(f"Restoring and segmenting channel {channel} is complete.")  
 
 def imagelist(directory):
     
@@ -1634,7 +1634,8 @@ def create_annotated_count_table(transformedcells, locations, channel, logger):
 #@Timer(name= "annotate_cells", text="Annotating cells processing time: {:.1f} seconds.")
 def annotate_points_v3(transformed_cells, annotations, output_id_dict, acronym_dict, locations):
     
-    region_info = pd.read_csv("C:/Users/Luke_H/Desktop/BrainJ Atlas/ABA_CCF_25_2017/Atlas_Regions.csv")
+
+    region_info = pd.read_csv(locations.annotations_table)
 
     transformed_cells = transformed_cells.reset_index()
 
@@ -1775,7 +1776,8 @@ def cell_annotation_in_blocks(cells, locations):
 def cell_annotation_gpu(cells, locations, logger):
         
     #import region information
-    region_info = pd.read_csv("C:/Users/Luke_H/Desktop/BrainJ Atlas/ABA_CCF_25_2017/Atlas_Regions.csv")
+
+    region_info = pd.read_csv(locations.annotations_table)
     
     #import annotation image
     #global annotations
