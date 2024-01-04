@@ -155,6 +155,7 @@ def analyze_sections(settings, locations, logger):
                 rawcells = pd.concat((rawcells, cells_table))
             else:
                 logger.info(f"Cells have already been measured. Please delete the file below and rerun to remeasure cell intensities.\n{locations.raw_measurements_dir}raw_cells.csv \n")
+
     
     
     #round to 2 decimal places - could do this somewhere in the function?
@@ -457,7 +458,7 @@ def restore_and_segment_stack(channel, rest_model_path, rest_type, seg_model, sc
                 cv2.imwrite(locations.restore_val_dir+str(channel)+"/"+str(channel)+".jpg", rescale(restored, 1/(validation_scale[0]), anti_aliasing=False).astype('uint16'), [cv2.IMWRITE_JPEG_QUALITY, settings.validation_jpeg_comp]) 
                 #save filtered labels colored by area
                 cv2.imwrite(locations.cell_val_dir+str(channel)+"/"+str(channel)+".jpg", rescale(labels, 1/(validation_scale[0]), anti_aliasing=False).astype('uint32'), [cv2.IMWRITE_JPEG_QUALITY, settings.validation_jpeg_comp]) 
-    logger.info(f"Restoring and segmenting channel {channel} is complete.")  
+    logger.info("")    
 
 def imagelist(directory):
     
@@ -1322,6 +1323,8 @@ def transform_cells_V2(rawcells, settings, locations, logger):
 
         
     if os.path.isfile(locations.raw_measurements_dir + 'transformed_cells.csv') is False:
+        logger.info("transformed_cells.csv not found - creating now...")
+        rawcells = pd.read_csv(locations.raw_measurements_dir + "raw_cells.csv")
         process, transformedcells = transform_cell_locations_V2(rawcells, settings, locations, logger)
         
         transformedcells.to_csv(locations.raw_measurements_dir + 'transformed_cells.csv',index=False) #, compression='gzip')
@@ -1496,6 +1499,8 @@ def transform_cell_locations_V2(cell_table_input, settings, locations, logger):
     total_points = cell_table_input.shape[0]
     
     cell_table = cell_table_input.copy(deep=True)
+    
+    #logger.info(cell_table.head(3).to_string())
        
     cell_points_file = locations.raw_measurements_dir + "raw_cells_locations.txt"
     
@@ -1561,7 +1566,8 @@ def transform_cell_locations_V2(cell_table_input, settings, locations, logger):
     transformed_cells = pd.read_csv(locations.transformed_cell_dir + "outputpoints.txt", sep=" ", header=None)
     
     while transformed_cells.shape[0] != total_points:
-        time.sleep(10)
+        time.sleep(30)
+        logger.info(f"{transformed_cells.shape[0]/total_points*100:.2f}% points transformed.")
         transformed_cells = pd.read_csv(locations.transformed_cell_dir + "outputpoints.txt", sep=" ", header=None)
     
    
@@ -1634,7 +1640,6 @@ def create_annotated_count_table(transformedcells, locations, channel, logger):
 #@Timer(name= "annotate_cells", text="Annotating cells processing time: {:.1f} seconds.")
 def annotate_points_v3(transformed_cells, annotations, output_id_dict, acronym_dict, locations):
     
-
     region_info = pd.read_csv(locations.annotations_table)
 
     transformed_cells = transformed_cells.reset_index()
@@ -1776,9 +1781,7 @@ def cell_annotation_in_blocks(cells, locations):
 def cell_annotation_gpu(cells, locations, logger):
         
     #import region information
-
     region_info = pd.read_csv(locations.annotations_table)
-    
     #import annotation image
     #global annotations
     annotations = imread(locations.annotations_image)
