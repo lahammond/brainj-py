@@ -7,8 +7,7 @@ Image Analysis
 """
 __author__    = 'Luke Hammond <lh2881@columbia.edu>'
 __license__   = 'MIT License (see LICENSE)'
-__copyright__ = 'Copyright © 2022 by Luke Hammond'
-__webpage__   = 'http://cellularimaging.org'
+__copyright__ = 'Copyright © 2024 by Luke Hammond'
 __download__  = 'http://www.github.com/lahmmond/BrainJ-Python'
 
 
