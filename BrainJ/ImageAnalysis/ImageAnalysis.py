@@ -115,16 +115,24 @@ def analyze_sections(settings, locations, logger):
     #find better way to to do this. shouldn't be an issue as they are called and used in the function??   
     #tissue_background required to fix high contrast around edges of tissue during restoration - fills zero values with this value
 
+
+
+
     #Restore and segment each channel:
     for i in range(1, 5):
         if getattr(settings, f'c{i}_cell_analysis'):
             if os.path.isfile(locations.cell_val_dir+'c'+str(i)+'_labels.npy') is False:
+                if not hasattr(settings, f'c{i}_max_int'):
+                    setattr(settings, f'c{i}_max_int', 65535)
+
+
                 restore_and_segment_stack(i, getattr(settings, f'c{i}_rest_model_path'), 
                                           getattr(settings, f'c{i}_rest_type'), 
                                           getattr(settings, f'c{i}_seg_model'), 
                                           getattr(settings, f'c{i}_scale'), 
-                                          getattr(settings, f'c{i}_preprocess'), 
-                                          getattr(settings, f'c{i}_prob_thresh'), 
+                                          getattr(settings, f'c{i}_preprocess'),
+                                          getattr(settings, f'c{i}_prob_thresh'),
+                                          getattr(settings, f'c{i}_max_int'),
                                           getattr(settings, f'c{i}_normalize'),
                                           getattr(settings, f'c{i}_save_val_data'), 
                                           settings, locations, logger)
@@ -162,7 +170,7 @@ def analyze_sections(settings, locations, logger):
         
     return rawcells
 
-def restore_and_segment_stack(channel, rest_model_path, rest_type, seg_model, scale, preprocess, prob_thresh, normalize_range, saveval, settings, locations, logger):
+def restore_and_segment_stack(channel, rest_model_path, rest_type, seg_model, scale, preprocess, prob_thresh, max_int, normalize_range, saveval, settings, locations, logger):
     #1, settings.c1_rest_model_path, settings.c1_rest_type, settings.c1_seg_model,c1_raw, settings.c1_scale, settings.c1_preprocess,settings.c1_prob_thresh, settings.c1_normalize,settings.c1_save_val_data, settings, locations)
     logger.info(f"Restoring and segmenting channel {channel}...")
     #import series as a npy array
@@ -278,10 +286,10 @@ def restore_and_segment_stack(channel, rest_model_path, rest_type, seg_model, sc
                 padded_image = np.pad(slice_img, ((0,pad_y),(0,pad_x)), constant_values=0)
     
                 #convert image to float32  
-                if channel == 1:
-                    padded_image = padded_image.astype(np.float32) #temporary until retrained model for 0-1norm
-                else:
-                    padded_image = (padded_image.astype('float32')) / 65535.
+                #if channel == 1:
+                #    padded_image = padded_image.astype(np.float32) #temporary until retrained model for 0-1norm
+                #else:
+                padded_image = (padded_image.astype('float32')) / max_int
                 
     
                 #patchify

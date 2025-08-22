@@ -48,6 +48,8 @@ for brain_dir in brain_dirs:
     locations.annotations_table = "C:/Users/Luke_H/Desktop/BrainJ Atlas/ABA_CCF_25_2017/Atlas_Regions.csv"
     settings.tiles_for_prediction = (2,2)
     settings.c1_cell_analysis = True
+    settings.c1_max_int = 65535 #use for finetuning sensitivity of tf cell detection
+    settings.c2_max_int = 20000 #use for finetuning sensitivity of tf cell detection
     
     locations.cell_analysis_out_dir
 
