@@ -3,6 +3,7 @@
 ![Python](https://img.shields.io/badge/Python-3.6%2B-blue)
 ![Status](https://img.shields.io/badge/Status-Experimental-orange)
 ![License](https://img.shields.io/badge/License-MIT-green)
+[![DOI](https://zenodo.org/badge/612290439.svg)](https://doi.org/10.5281/zenodo.18157717)
 
 **brainj-py** is a Python-based extension of the original [BrainJ](https://github.com/lahammond/BrainJ) software. It introduces deep learning capabilities for automated restoration and U-Net segmentation of brain tissue sections, followed by activity mapping and statistical analysis.
 Active development on this repository was paused in 2023. While this code has been used successfully in specific research projects, it is **not currently production-ready** for general use. Users should expect to perform some manual configuration and debugging.
