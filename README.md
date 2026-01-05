@@ -9,7 +9,7 @@ Active development on this repository was paused in 2023. While this code has be
 
 ---
 
-## 🔗 Relationship to BrainJ (Fiji)
+## Relationship to BrainJ (Fiji)
 
 This tool is designed to work in tandem with the original BrainJ plugin (ImageJ/Fiji). It is not yet a complete standalone replacement.
 
@@ -27,7 +27,7 @@ This tool is designed to work in tandem with the original BrainJ plugin (ImageJ/
 
 ---
 
-## ✨ Key Features
+## Key Features
 
 * **Deep Learning Segmentation:** Implements U-Net architectures for robust tissue segmentation (e.g., separating tissue from background/artifacts), offering improved accuracy over coventional thresholding methods.
 * **Activity Mapping:** Automated mapping of cellular activity markers onto registered brain space.
