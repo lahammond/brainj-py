@@ -45,8 +45,24 @@ The following features are currently missing or require further development to b
 
 ---
 
+## Pre-trained Models
+
+### CARE Restoration Models
+[Download CARE Models](https://drive.google.com/drive/folders/1fm-EKm-lsqg2Oex-EJyMR5QlZ_gPhsmO?usp=sharing)
+
+> **Important Warning:** Image restoration models are **not recommended** for use on different microscopes or objectives than they were trained on. 
+> 
+> To achieve valid results, these models should be trained with high and low SNR image pairs captured on the specific microscope being used for your experiment data collection, using settings optimized for your experiment. Changes to image quality, scale, or other parameters often lead to poor performance and artifacts.
+
+### ResNet Models for Cell Segmentation
+[Download Segmentation Models](https://drive.google.com/drive/folders/1UZD1PxGwGe9x5kp5iSBxmaS4_C_32_2D?usp=sharing)
+
+These segmentation models were trained on widefield data (1.6um pixel size) specifically for detecting **c-Fos** and **TRAP** positive cells.
+
+---
+
 ## Installation & Requirements
 
 ### Python Dependencies
-Development environment used CUDA 11.2 and cuDNN 8.1
+The development environment for this software was configured using **CUDA 11.2** and **cuDNN 8.1**.
 
