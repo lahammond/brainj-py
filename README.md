@@ -11,7 +11,7 @@ Active development on this repository was paused in 2023. While this code has be
 
 ## Relationship to BrainJ (Fiji)
 
-This tool is designed to work in tandem with the original BrainJ plugin (ImageJ/Fiji). It is not yet a complete standalone replacement.
+This tool currently needs to be used in tandem with the original BrainJ plugin (ImageJ/Fiji). It is not yet a complete standalone replacement.
 
 * **Original Repo:** [lahammond/BrainJ](https://github.com/lahammond/BrainJ)
 * **Recommended Workflow:** For the most stable results, we recommend a hybrid workflow:
