@@ -24,7 +24,7 @@ This tool currently needs to be used in tandem with the original BrainJ plugin (
 | **3. 3D Atlas Registration** | [BrainJ (Original)](https://github.com/lahammond/BrainJ) | Alignment to reference atlases (e.g., ABA). |
 | **4. Restoration & Segmentation** | **brainj-py** | Uses U-Net (Deep Learning) for superior segmentation. |
 | **5. Activity Mapping** | **brainj-py** | Automated mapping of cellular markers (e.g., c-Fos). |
-| **6. Statistical Analysis** | MATLAB | MATLAB scripts for two-timepoint statistics. |
+| **6. Statistical Analysis** | MATLAB | [MATLAB scripts for two-timepoint statistics](https://github.com/ekyzar/ttps_pipeline). |
 
 ---
 
